@@ -1,9 +1,14 @@
 --!strict
 -- Bot AI (docs/DESIGN.md "Bot AI"). Each plan walks the priority list and returns the first command that applies:
---   1. Defend  2. Recruit  3. Expand  4. Attack  5. Build  6. Diplomacy  (7. Primordial power: see below)
+--   1. Defend  2. Recruit  3. Expand  4. Attack  5. Sea  6. Build  7. Diplomacy
+-- and two kinds of order ride along with whatever the plan does: fleet orders (see "Sea") and the Primordial power.
 -- Troops, by role in the race's roster: the line troop is the base; a threatened province raises the ranged troop
 -- (while it is under Config.Bots.RangedShare of my men); at war, a bot that can pay for them and keep its upkeep
 -- reserve recruits its special, its elite and its fast troop, each up to its share of my men (see pickTroop).
+-- Tactics (docs/DESIGN.md "Bot AI", Config.Bots): it raises the troop that beats the armies near its land
+-- (counterRole), judges fights with the counters, flanks and both sides' morale (strengths, Battle.outcome), won't
+-- attack into a counter without a bigger margin, rests armies with low morale, and strikes with two stacks from two
+-- sides at once (strikeTogether, takePlaces).
 -- The EU4 pack's diplomacy rides along with the plan like the power does (see social): a bot lets a nation it has
 -- nothing against through its land, insults back now and then, and now and then insults a rival. An insulted
 -- bot leans towards war with its insulter: that nation is its first war target, at Config.Bots.GrudgeAttackRatio of
@@ -19,6 +24,7 @@
 -- Bot.plan is pure: state + nation + rng + difficulty (+ an optional memory the caller keeps) -> commands.
 -- Bot.step does the scheduling for a whole match (who plans this tick), for AIService and headless runs.
 
+local Army = require("./Army")
 local Battle = require("./Battle")
 local Commands = require("./Commands")
 local Config = require("../Config")
@@ -27,6 +33,7 @@ local Economy = require("./Economy")
 local EventCards = require("./EventCards")
 local Fog = require("./Fog")
 local Missions = require("./Missions")
+local Navy = require("./Navy")
 local Pathing = require("./Pathing")
 local Primordial = require("./Primordial")
 local Races = require("./Races")
@@ -36,6 +43,7 @@ local Types = require("../Types")
 
 type MatchState = Types.MatchState
 type Army = Types.Army
+type Fleet = Types.Fleet
 type Command = Types.Command
 
 export type Difficulty = Types.Difficulty
@@ -45,15 +53,21 @@ export type Settings = {
 	attackRatio: number,
 	noPlayerWarTicks: number,
 	targetsLeadingPlayer: boolean,
+	navyGoldShare: number,
+	fleetShips: number,
 }
 
 -- What a bot remembers between plans: its province count when each of its wars started, when it last made each
--- kind of offer to each nation (so it doesn't repeat itself every time an offer expires), and the insults and event
--- cards it has decided how to answer.
+-- kind of offer to each nation (so it doesn't repeat itself every time an offer expires), the insults and event
+-- cards it has decided how to answer, the sea zone where it is gathering ships for a landing (so its spare fleets
+-- sail there rather than home) and the coast its embarking army is meant for.
 export type Memory = {
 	warStart: { [number]: { startedAt: number, provinces: number } }, -- war id -> snapshot
 	offeredAt: { [string]: number }, -- "Ally:3" -> tick
 	answered: { [string]: boolean }, -- "insulter:window end" (an insult), "card:id" (an event card) -> decided
+	seaZone: number?, -- the port zone of the landing being prepared...
+	seaUntil: number?, -- ...until this tick (Config.Bots.SeaPrepareTicks after the bot last worked on it)
+	seaTarget: number?, -- where the army that embarked last is to land (if it still can when it is aboard)
 }
 
 export type Schedule = {
@@ -136,6 +150,13 @@ type Ctx = {
 	reserved: { [number]: number }, -- army id -> where the threat it guards against stands
 	vision: Fog.Vision, -- what I see (the fog of war): other nations' armies out of sight don't exist for me
 	goals: Missions.Goals, -- my missions' province and buildings (Sim.Missions)
+	fleets: { Fleet }, -- mine that take orders (not retreating), sorted by id
+	shipUpkeep: number, -- what all my ships cost a month
+	boarders: { [number]: boolean }, -- my fleets an army of mine is walking to board
+	enemyHull: { [number]: number }, -- sea zone -> hull of the fleets at war with me there that I see (Navy.visible)
+	-- worked out once per plan, when first needed (the state doesn't change while a bot plans)
+	reach: { [number]: { order: { number }, dist: { [number]: number } } }, -- reachable(), by starting province
+	landingShips: number?,
 }
 
 local function sortedKeys(t: { [number]: any }): { number }
@@ -179,6 +200,26 @@ local function context(state: MatchState, me: number, rng: Rng.Rng, settings: Se
 	local troopMen: { [string]: number } = {}
 	local targeted = {}
 	local vision = Fog.vision(state, me)
+	-- fleets: the men aboard mine are still my men (they cost upkeep and land as an army)
+	local fleets: { Fleet } = {}
+	local shipUpkeep = 0
+	local enemyHull: { [number]: number } = {}
+	for _, id in sortedKeys(state.fleets) do
+		local f = state.fleets[id]
+		if f.owner == me then
+			shipUpkeep += f.hull / Config.Navy.ShipHull * Config.Navy.ShipUpkeep
+			men += f.men
+			for troop, n in f.troops do
+				troopMen[troop] = (troopMen[troop] or 0) + n
+			end
+			if not f.retreating then
+				table.insert(fleets, f)
+			end
+		elseif not f.retreating and isEnemy[f.owner] and Navy.visible(state, me, f, vision) then
+			enemyHull[f.zone] = (enemyHull[f.zone] or 0) + f.hull
+		end
+	end
+	local boarders: { [number]: boolean } = {}
 	for _, id in sortedKeys(state.armies) do
 		local a = state.armies[id]
 		if not Fog.seesArmy(vision, a) then
@@ -205,6 +246,9 @@ local function context(state: MatchState, me: number, rng: Rng.Rng, settings: Se
 		if a.owner == me then
 			table.insert(myArmies, a)
 			men += a.men
+			if a.boardFleet then
+				boarders[Navy.resolve(state, a.boardFleet)] = true
+			end
 			if #a.path > 0 then
 				targeted[a.path[#a.path]] = true
 			elseif not isMine[a.location] then
@@ -236,6 +280,11 @@ local function context(state: MatchState, me: number, rng: Rng.Rng, settings: Se
 		reserved = {},
 		vision = vision,
 		goals = Missions.goals(state, me),
+		fleets = fleets,
+		shipUpkeep = shipUpkeep,
+		boarders = boarders,
+		enemyHull = enemyHull,
+		reach = {},
 	}
 end
 
@@ -267,10 +316,11 @@ local function menOf(armies: { Army }): number
 	return n
 end
 
--- Combat strength (men × each troop's attack or defence × the Battle modifiers: terrain, fort, race and catch-up
--- bonuses) of my armies and theirs if they fight in this province. `iDefend` says which side holds it. Rolls are the
--- random ± per battle (0 = average). Also each side's kills per man (strength / men: losses split evenly over troop
--- types, so it holds for the whole battle) and my bare modifier.
+-- Combat strength (men × each troop's attack or defence × its counter against the other side × the Battle
+-- modifiers: terrain, fort, race, flank and catch-up bonuses) of my armies and theirs if they fight in this province.
+-- `iDefend` says which side holds it. Rolls are the random ± per battle (0 = average). Also each side's kills per man
+-- and round (losses split evenly over troop types, so it holds for the whole battle) and my bare modifier. My armies
+-- count the provinces they stand in as their directions: stacks striking from two neighbours flank.
 local function strengths(
 	ctx: Ctx,
 	provinceId: number,
@@ -294,24 +344,23 @@ local function strengths(
 	for _, a in theirs do
 		neutral = neutral and a.owner == 0
 	end
-	local my = Battle.strength(mine, iDefend, terrain, neutral and #theirs > 0) * myMod
-	local their = Battle.strength(theirs, not iDefend, terrain, false) * theirMod
+	local my = Battle.strength(mine, iDefend, terrain, neutral and #theirs > 0, Battle.composition(theirs)) * myMod
+	local their = Battle.strength(theirs, not iDefend, terrain, false, Battle.composition(mine)) * theirMod
 	local myMen, theirMen = menOf(mine), menOf(theirs)
-	local myRate = if myMen > 0 then my / myMen else myMod
-	local theirRate = if theirMen > 0 then their / theirMen else theirMod
+	local rate = Config.Battle.KillRatePerRound
+	local myRate = rate * (if myMen > 0 then my / myMen else myMod)
+	local theirRate = rate * (if theirMen > 0 then their / theirMen else theirMod)
 	return my, their, myRate, theirRate, myMod
 end
 
--- Plays out a battle's rounds: do I end with more men, and enough to survive?
-local function wouldWin(myMen: number, myMod: number, theirMen: number, theirMod: number): boolean
-	local rate = Config.Battle.KillRatePerRound
-	for _ = 1, Config.Battle.Rounds do
-		if myMen <= 0 or theirMen <= 0 then
-			break
-		end
-		myMen, theirMen = myMen - theirMen * rate * theirMod, theirMen - myMen * rate * myMod
-	end
-	return myMen > math.max(theirMen, 0) and myMen >= Config.Army.MinArmyMen
+-- Plays out a battle's rounds with both sides' morale (Battle.outcome): do I win, with enough men to survive?
+local function wouldWin(mine: Battle.Fighter, theirs: Battle.Fighter, iDefend: boolean): boolean
+	local won, left = Battle.outcome(mine, theirs, iDefend)
+	return won and left >= Config.Army.MinArmyMen
+end
+
+local function fighter(armies: { Army }, rate: number, scale: number?): Battle.Fighter
+	return { men = menOf(armies) * (scale or 1), rate = rate, morale = Battle.morale(armies) }
 end
 
 -- Can these armies beat everything standing in a province they attack, even with unlucky rolls?
@@ -322,19 +371,40 @@ local function canBeat(ctx: Ctx, provinceId: number, armies: { Army }): boolean
 	end
 	local spread = Config.Battle.RandomSpread
 	local _, _, myRate, theirRate = strengths(ctx, provinceId, armies, theirs, false, -spread, spread)
-	return wouldWin(menOf(armies), myRate, menOf(theirs), theirRate)
+	return wouldWin(fighter(armies, myRate), fighter(theirs, theirRate), false)
+end
+
+-- How much one side's men gain from the troop counters against the other's, on average per man (0 = nothing).
+local function counterEdge(side: { Army }, enemy: { Army }): number
+	local shares = Troops.roleShares(Battle.composition(enemy))
+	local comp = Battle.composition(side)
+	local total, sum = 0, 0
+	for _, troop in Troops.LIST do
+		local n = comp[troop]
+		if n then
+			total += n
+			sum += n * Troops.counter(Troops.stats(troop).role, shares)
+		end
+	end
+	return if total > 0 then sum / total - 1 else 0
 end
 
 -- Are these armies strong enough (by the difficulty's attack ratio, times `factor` if given) to attack `theirs` in
--- a province?
+-- a province? Not with low morale; against troops that counter mine, only with Config.Bots.CounteredExtraRatio more.
+-- Strong enough is either that much more strength, or a win even against that many times their men (a worn-out
+-- enemy breaks early).
 local function aboveRatio(ctx: Ctx, provinceId: number, armies: { Army }, theirs: { Army }, factor: number?): boolean
-	if menOf(armies) < Config.Army.MinArmyMen then
+	if menOf(armies) < Config.Army.MinArmyMen or Battle.morale(armies) < Config.Bots.MinAttackMorale then
 		return false
 	elseif #theirs == 0 then
 		return true
 	end
-	local my, their = strengths(ctx, provinceId, armies, theirs, false, 0, 0)
-	return my >= ctx.settings.attackRatio * (factor or 1) * their
+	local my, their, myRate, theirRate = strengths(ctx, provinceId, armies, theirs, false, 0, 0)
+	local ratio = ctx.settings.attackRatio * (factor or 1)
+	if counterEdge(theirs, armies) - counterEdge(armies, theirs) > Config.Bots.CounterEdge then
+		ratio += Config.Bots.CounteredExtraRatio
+	end
+	return my >= ratio * their or wouldWin(fighter(armies, myRate), fighter(theirs, theirRate, ratio), false)
 end
 
 -- The route an army would take (the same BFS as Movement.order), if it doesn't fight anyone before arriving.
@@ -353,6 +423,10 @@ end
 
 -- Provinces reachable from `from`, nearest first, without walking through hostile armies (they can be the goal).
 local function reachable(ctx: Ctx, from: number): ({ number }, { [number]: number })
+	local known = ctx.reach[from]
+	if known then
+		return known.order, known.dist
+	end
 	local state = ctx.state
 	local dist: { [number]: number } = { [from] = 0 }
 	local order = {}
@@ -371,6 +445,7 @@ local function reachable(ctx: Ctx, from: number): ({ number }, { [number]: numbe
 			end
 		end
 	end
+	ctx.reach[from] = { order = order, dist = dist }
 	return order, dist
 end
 
@@ -406,7 +481,7 @@ local function pickTarget(ctx: Ctx, army: Army, want: (number) -> boolean): numb
 end
 
 -- My armies free for a new job, grouped by province (a stack marches and fights together): standing still at
--- home, not besieging, not fighting, not guarding a border. Biggest stack first.
+-- home, rested (Config.Bots.MinAttackMorale), not besieging, not fighting, not guarding a border. Biggest stack first.
 type Stack = { location: number, armies: { Army }, men: number }
 
 -- Men of other nations' armies in a province that neither fight me nor help me besiege it, and the lowest of their
@@ -444,7 +519,14 @@ local function freeStacks(ctx: Ctx): { Stack }
 	local byLocation: { [number]: Stack } = {}
 	local out: { Stack } = {}
 	for _, a in ctx.myArmies do
-		if not a.inBattle and #a.path == 0 and not holdsGround(ctx, a) and ctx.reserved[a.id] == nil then
+		if
+			not a.inBattle
+			and #a.path == 0
+			and a.boardFleet == nil -- waiting on a coast for its fleet
+			and a.morale >= Config.Bots.MinAttackMorale -- a tired or broken army rests
+			and not holdsGround(ctx, a)
+			and ctx.reserved[a.id] == nil
+		then
 			local stack = byLocation[a.location]
 			if stack == nil then
 				stack = { location = a.location, armies = {}, men = 0 }
@@ -503,10 +585,34 @@ local function underShare(ctx: Ctx, men: number, share: number): boolean
 	return men <= share * ctx.men
 end
 
--- What to recruit (up to `regiments` regiments) for the next fight, from my race's roster: at war, my special while
+-- The role shares of my enemies' armies in and next to my land (Troops.roleShares).
+local function frontMix(ctx: Ctx): { [string]: number }
+	local near: { [number]: boolean } = {}
+	for _, id in ctx.mine do
+		near[id] = true
+		for _, n in ctx.state.provinces[id].neighbors do
+			near[n] = true
+		end
+	end
+	local men: Types.Composition = {}
+	for location in near do
+		for _, a in ctx.armiesAt[location] or NONE do
+			if a.owner ~= 0 and ctx.isEnemy[a.owner] then
+				for _, troop in Troops.LIST do
+					men[troop] = (men[troop] or 0) + (a.troops[troop] or 0)
+				end
+			end
+		end
+	end
+	return Troops.roleShares(men)
+end
+
+-- What to recruit (up to `regiments` regiments) for the next fight, from my race's roster. At war: my special while
 -- it is under Config.Bots.SpecialShare of my men, else my elite and my fast troop while each is under its share
--- (Config.Bots.EliteShare, FastShare), the one furthest below its share first (a tie: the elite), the first of those I
--- am rich enough for; else my line troop, the base.
+-- (Config.Bots.EliteShare, FastShare), the one furthest below its share first (a tie: the elite), else the troop that
+-- beats my enemies' armies near my land (frontMix, Troops.bestCounter) while it is under Config.Bots.CounterShare,
+-- the first of those I am rich enough for, but never a troop those armies beat (Troops.counterScore at or under
+-- -CounterMinScore). Else my line troop, the base.
 local function pickTroop(ctx: Ctx, regiments: number): (Types.Troop, number)
 	local race = ctx.nation.race
 	local line = Troops.ofRole(race, "line") or Troops.BASE
@@ -534,8 +640,15 @@ local function pickTroop(ctx: Ctx, regiments: number): (Types.Troop, number)
 		for _, troop in pair do
 			table.insert(options, troop)
 		end
+		local mix = frontMix(ctx)
+		local role = Troops.bestCounter(mix, Config.Bots.CounterMinScore)
+		local counter = if role and role ~= "line" then Troops.ofRole(race, role) else nil
+		if counter and underShare(ctx, ctx.troopMen[counter] or 0, Config.Bots.CounterShare) then
+			table.insert(options, counter)
+		end
 		for _, troop in options do
-			local n = richEnough(ctx, troop, regiments)
+			local beaten = Troops.counterScore(Troops.stats(troop).role, mix) <= -Config.Bots.CounterMinScore
+			local n = if beaten then 0 else richEnough(ctx, troop, regiments)
 			if n >= 1 then
 				return troop, n
 			end
@@ -651,7 +764,7 @@ local function guardsOf(ctx: Ctx, provinceId: number): { Army }
 	return out
 end
 
--- My nearest army (by steps) that could come and help in a province, with a clear route there.
+-- My nearest rested army (by steps) that could come and help in a province, with a clear route there.
 local function nearestHelper(ctx: Ctx, provinceId: number, skip: { [number]: boolean }): Army?
 	local candidates = { provinceId }
 	local order = reachable(ctx, provinceId)
@@ -662,7 +775,8 @@ local function nearestHelper(ctx: Ctx, provinceId: number, skip: { [number]: boo
 	for _, p in candidates do
 		local best: Army? = nil
 		for _, a in ctx.armiesAt[p] or {} do
-			if a.owner == ctx.me and not a.inBattle and not skip[a.id] and ctx.reserved[a.id] == nil then
+			local rested = p == provinceId or a.morale >= Config.Bots.MinAttackMorale -- a tired army doesn't march to help
+			if a.owner == ctx.me and not a.inBattle and not skip[a.id] and ctx.reserved[a.id] == nil and rested then
 				if best == nil or a.men > best.men then
 					best = a
 				end
@@ -697,6 +811,8 @@ local function defend(ctx: Ctx): { Command }?
 	end
 	for _, t in list do
 		local guards = guardsOf(ctx, t.target)
+		-- by strength with the counters, not morale: a tired guard recruiting until it wouldn't break drained the gold
+		-- bots keep for elites (docs/BALANCE.md section 22)
 		local my, their, _, _, myMod = strengths(ctx, t.target, guards, t.armies, true, 0, 0)
 		if my >= ratio * their then
 			for _, g in guards do
@@ -715,9 +831,9 @@ local function defend(ctx: Ctx): { Command }?
 					end
 				end
 			end
-			-- not enough men nearby: raise them where the threat is, my ranged troop (the best defenders) if I can
-			-- pay and it is still under Config.Bots.RangedShare of my men, else my line troop
-			local missing = ratio * their - my
+			-- not enough men nearby: raise them where the threat is: my ranged troop (the best defenders) if I can pay
+			-- and it is still under Config.Bots.RangedShare of my men, and my line troop, the one that defends better
+			-- against this enemy's mix first (its counters)
 			local race = ctx.nation.race
 			local line = Troops.ofRole(race, "line") or Troops.BASE
 			local ranged = Troops.ofRole(race, "ranged")
@@ -725,8 +841,17 @@ local function defend(ctx: Ctx): { Command }?
 					and underShare(ctx, ctx.troopMen[ranged] or 0, Config.Bots.RangedShare)
 				then { ranged, line }
 				else { line }
+			local shares = Troops.roleShares(Battle.composition(t.armies))
+			local function holding(troop: Types.Troop): number
+				local stats = Troops.stats(troop)
+				return stats.defence * Troops.counter(stats.role, shares)
+			end
+			if #options == 2 and holding(options[2]) > holding(options[1]) then
+				options[1], options[2] = options[2], options[1]
+			end
+			local missing = ratio * their - my
 			for _, troop in options do
-				local perRegiment = Config.Army.MenPerRegiment * Troops.stats(troop).defence * myMod
+				local perRegiment = Config.Army.MenPerRegiment * holding(troop) * myMod
 				local regiments = math.min(math.ceil(missing / perRegiment), affordable(ctx, troop))
 				if regiments >= 1 then
 					local result =
@@ -821,6 +946,193 @@ local function expand(ctx: Ctx): { Command }?
 	return nil
 end
 
+-- At sea: what the plan steps know about fleets and landings (4. Attack, 5. Sea, fleet orders) ------------------
+
+local function seaEnabled(ctx: Ctx): boolean
+	return next(ctx.state.zones) ~= nil
+end
+
+-- The men a fleet would put ashore: up to `men` of these troops (every type in proportion) as one army, for strength
+-- checks only (the same checks as a land attack: aboveRatio, canBeat). Men land as a new army with full morale
+-- (Sim.Navy), from one direction (the sea), so the party has both; a tired stack never boards (freeStacks).
+local function landingParty(ctx: Ctx, troops: Types.Composition, men: number): { Army }
+	local total = 0
+	for _, n in troops do
+		total += n
+	end
+	local party: Army = {
+		id = 0,
+		owner = ctx.me,
+		location = 0,
+		men = 0,
+		troops = {},
+		path = {},
+		moveProgress = 0,
+		inBattle = false,
+		morale = Config.Battle.MoraleMax,
+	}
+	Army.setTroops(party, Troops.split(troops, math.min(men, total)))
+	return { party }
+end
+
+-- Every troop of a stack's armies together.
+local function stackTroops(stack: Stack): Types.Composition
+	local out: Types.Composition = {}
+	for _, a in stack.armies do
+		for troop, n in a.troops do
+			out[troop] = (out[troop] or 0) + n
+		end
+	end
+	return out
+end
+
+-- Sea zones from `from`, counted in zones (the search Navy.route sails).
+local function zoneDistances(ctx: Ctx, from: number): { [number]: number }
+	local zones = ctx.state.zones
+	local dist: { [number]: number } = { [from] = 0 }
+	local queue = { from }
+	local head = 1
+	while head <= #queue do
+		local cur = queue[head]
+		head += 1
+		for _, n in zones[cur].neighbors do
+			if dist[n] == nil then
+				dist[n] = dist[cur] + 1
+				table.insert(queue, n)
+			end
+		end
+	end
+	return dist
+end
+
+-- Can a fleet of `hull` sail this route without meeting a fleet it wouldn't beat by my attack ratio? Only the
+-- fleets Navy.visible shows me count (ctx.enemyHull).
+local function routeSafe(ctx: Ctx, route: { number }, hull: number): boolean
+	for _, z in route do
+		local enemy = ctx.enemyHull[z]
+		if enemy and enemy * ctx.settings.attackRatio > hull then
+			return false
+		end
+	end
+	return true
+end
+
+-- Ships I may still add while my ships' upkeep stays under the difficulty's navyGoldShare of my gold income.
+local function shipRoom(ctx: Ctx): number
+	local income = Economy.monthlyIncome(ctx.state, ctx.me).gold
+	local room = (ctx.settings.navyGoldShare * income - ctx.shipUpkeep) / Config.Navy.ShipUpkeep
+	return math.max(0, math.floor(room))
+end
+
+-- A fleet of mine free to carry a landing: empty, nobody walking to board it, not fighting.
+local function spareFleet(ctx: Ctx, f: Fleet): boolean
+	return f.men == 0 and not f.inBattle and not ctx.boarders[f.id]
+end
+
+-- Ships one landing may have: my spare fleets' ships and those I may still add, at most the difficulty's fleetShips.
+local function landingShips(ctx: Ctx): number
+	local known = ctx.landingShips
+	if known then
+		return known
+	end
+	local ships = 0
+	for _, f in ctx.fleets do
+		if spareFleet(ctx, f) then
+			ships += Navy.ships(f)
+		end
+	end
+	local n = math.min(ctx.settings.fleetShips, ships + shipRoom(ctx))
+	ctx.landingShips = n
+	return n
+end
+
+-- Could a landing of `party` take this coast? Neutral land it beats even with unlucky rolls, or land of a nation at
+-- war with me (that I may invade) where it is above my attack ratio; none of my armies already on the way, no rival
+-- there.
+local function landingSpot(ctx: Ctx, p: number, party: { Army }): boolean
+	local owner = ctx.state.provinces[p].owner
+	if owner == ctx.me or ctx.targeted[p] or not canEnter(ctx, p) or (rivalsAt(ctx, p)) > 0 then
+		return false
+	elseif owner == nil then
+		return canBeat(ctx, p, party)
+	end
+	return ctx.isEnemy[owner] == true and mayInvade(ctx, p) and aboveRatio(ctx, p, party, hostileAt(ctx, p))
+end
+
+-- The coast nearest by sea from `zone` (at most Config.Bots.MaxLandingZones on) that a landing of `party` can take, on
+-- a fleet of `hull` that meets no stronger fleet on the way (the richest, then the lowest id, among equally near
+-- ones). With `walker`, only coasts its armies can't walk to: no route by land (it runs through a nation at peace
+-- with me) or a closed one (an enemy fleet in a strait, an enemy army on the way). At most
+-- Config.Bots.MaxLandingChecks coasts are weighed.
+local function bestLanding(ctx: Ctx, zone: number, party: { Army }, hull: number, walker: Army?): number?
+	local state = ctx.state
+	local dist = zoneDistances(ctx, zone)
+	type Spot = { id: number, d: number, dev: number }
+	local spots: { Spot } = {}
+	for _, p in sortedKeys(state.shores) do
+		local q = state.provinces[p]
+		if q.owner ~= ctx.me and (q.owner == nil or ctx.isEnemy[q.owner]) and not ctx.targeted[p] then
+			local d = math.huge
+			for _, z in Navy.shores(state, p) do
+				d = math.min(d, dist[z] or math.huge)
+			end
+			if d <= Config.Bots.MaxLandingZones then
+				table.insert(spots, { id = p, d = d, dev = q.development })
+			end
+		end
+	end
+	table.sort(spots, function(a: Spot, b: Spot): boolean
+		if a.d ~= b.d then
+			return a.d < b.d
+		elseif a.dev ~= b.dev then
+			return a.dev > b.dev
+		end
+		return a.id < b.id
+	end)
+	local byLand: { [number]: number } = {}
+	if walker then
+		local _, landDist = reachable(ctx, walker.location)
+		byLand = landDist
+	end
+	local weighed, routes = 0, 0
+	for _, spot in spots do
+		if weighed >= Config.Bots.MaxLandingChecks then
+			break
+		end
+		local overSea = true
+		if walker and byLand[spot.id] then
+			-- my armies could walk there: only if that route is closed
+			overSea = routes < Config.Bots.MaxRouteChecks and clearRoute(ctx, walker, spot.id) == nil
+			routes += 1
+		end
+		if overSea then
+			weighed += 1
+			if landingSpot(ctx, spot.id, party) then
+				local route = Navy.route(state, zone, function(z)
+					return Navy.touches(state, spot.id, z)
+				end)
+				if route and routeSafe(ctx, route, hull) then
+					return spot.id
+				end
+			end
+		end
+	end
+	return nil
+end
+
+-- My nearest coast (by land from `from`) that can launch ships: mine and not blockaded.
+local function nearestPort(ctx: Ctx, from: number): number?
+	local state = ctx.state
+	local path = Pathing.nearest(state, ctx.me, from, function(p)
+		local q = state.provinces[p]
+		return q.owner == ctx.me and q.blockade == nil and Navy.port(state, p) ~= nil
+	end)
+	if path == nil then
+		return nil
+	end
+	return if #path == 0 then from else path[#path]
+end
+
 -- 4. Attack ----------------------------------------------------------------------------------------------
 
 -- The men of a nation and its allies (those I can see).
@@ -861,7 +1173,10 @@ end
 -- At peace with everyone: declare war on my weakest neighbour (Hard: the leading player first) if I am not
 -- weaker overall and one of my free stacks beats, by the attack ratio, everything guarding one of its border
 -- provinces. A neighbour that insulted me comes first, and my stack needs only Config.Bots.GrudgeAttackRatio of the
--- usual attack ratio against it (never under Config.Bots.GrudgeMinRatio, an even fight).
+-- usual attack ratio against it (never under Config.Bots.GrudgeMinRatio, an even fight). With nobody to fight by
+-- land, a nation across the sea (we hold coasts of one sea zone, the war reach of docs/DESIGN.md "Navies") whose
+-- coast there a landing from one of my free stacks would beat the same way, if I can have the ships for it (the Sea
+-- step lands it).
 local function declareWar(ctx: Ctx): { Command }?
 	local state = ctx.state
 	if state.phase == "Peace" then
@@ -872,60 +1187,68 @@ local function declareWar(ctx: Ctx): { Command }?
 		return nil
 	end
 	type Candidate = { id: number, men: number, tiebreak: number, front: { number } }
-	local byId: { [number]: Candidate } = {}
-	local candidates: { Candidate } = {}
-	for _, id in ctx.mine do
-		for _, n in state.provinces[id].neighbors do
+	local function eligible(owner: number): boolean
+		local nation = state.nations[owner]
+		return nation ~= nil
+			and not nation.eliminated
+			and not Diplomacy.allied(state, ctx.me, owner)
+			and not Diplomacy.hasTruce(state, ctx.me, owner)
+			and playerWarAllowed(ctx, owner)
+	end
+	-- the nations owning `provinces` (each with its provinces among them), weakest side first (Hard: the leading
+	-- player first; a random order among equals)
+	local leader = if ctx.settings.targetsLeadingPlayer then leadingPlayer(ctx) else nil
+	local function ranked(provinces: { number }): { Candidate }
+		local byId: { [number]: Candidate } = {}
+		local candidates: { Candidate } = {}
+		for _, n in provinces do
 			local owner = state.provinces[n].owner
 			if owner and owner ~= ctx.me then
 				local c = byId[owner]
-				if c == nil then
-					local nation = state.nations[owner]
-					if
-						nation
-						and not nation.eliminated
-						and not Diplomacy.allied(state, ctx.me, owner)
-						and not Diplomacy.hasTruce(state, ctx.me, owner)
-						and playerWarAllowed(ctx, owner)
-					then
-						c = { id = owner, men = sideMen(ctx, owner), tiebreak = 0, front = {} }
-						byId[owner] = c
-						table.insert(candidates, c)
-					end
+				if c == nil and eligible(owner) then
+					c = { id = owner, men = sideMen(ctx, owner), tiebreak = 0, front = {} }
+					byId[owner] = c
+					table.insert(candidates, c)
 				end
 				if c and table.find(c.front, n) == nil then
 					table.insert(c.front, n)
 				end
 			end
 		end
+		table.sort(candidates, function(a, b)
+			return a.id < b.id
+		end)
+		for _, c in candidates do
+			c.tiebreak = Rng.next(ctx.rng)
+		end
+		table.sort(candidates, function(a, b)
+			local ga, gb = ctx.grudge[a.id] == true, ctx.grudge[b.id] == true
+			if ga ~= gb then
+				return ga -- an insult is remembered
+			end
+			if (a.id == leader) ~= (b.id == leader) then
+				return a.id == leader
+			end
+			if a.men ~= b.men then
+				return a.men < b.men
+			end
+			return a.tiebreak < b.tiebreak
+		end)
+		return candidates
 	end
-	table.sort(candidates, function(a, b)
-		return a.id < b.id
-	end)
-	for _, c in candidates do
-		c.tiebreak = Rng.next(ctx.rng)
+	local borderLand = {}
+	for _, id in ctx.mine do
+		for _, n in state.provinces[id].neighbors do
+			table.insert(borderLand, n)
+		end
 	end
-	local leader = if ctx.settings.targetsLeadingPlayer then leadingPlayer(ctx) else nil
-	table.sort(candidates, function(a, b)
-		local ga, gb = ctx.grudge[a.id] == true, ctx.grudge[b.id] == true
-		if ga ~= gb then
-			return ga -- an insult is remembered
-		end
-		if (a.id == leader) ~= (b.id == leader) then
-			return a.id == leader
-		end
-		if a.men ~= b.men then
-			return a.men < b.men
-		end
-		return a.tiebreak < b.tiebreak
-	end)
 	local mySide = sideMen(ctx, ctx.me)
 	local distances: { { [number]: number } } = {}
 	for i, stack in stacks do
 		local _, dist = reachable(ctx, stack.location)
 		distances[i] = dist
 	end
-	for _, c in candidates do
+	for _, c in ranked(borderLand) do
 		local factor = if ctx.grudge[c.id] then Bot.grudgeFactor(ctx.settings.attackRatio) else 1
 		if mySide >= c.men then
 			local members = Diplomacy.allianceMembers(state, c.id)
@@ -940,6 +1263,145 @@ local function declareWar(ctx: Ctx): { Command }?
 						return try(ctx, { kind = "Diplomacy", action = "War", target = c.id, gold = 0 })
 					end
 				end
+			end
+		end
+	end
+	-- across the sea: the other coasts of every zone I hold a coast of
+	local ships = if seaEnabled(ctx) then landingShips(ctx) else 0
+	if ships < 1 then
+		return nil
+	end
+	local shore = {}
+	for _, zid in sortedKeys(state.zones) do
+		local coasts = state.zones[zid].coasts
+		local mineHere = false
+		for _, p in coasts do
+			mineHere = mineHere or ctx.isMine[p] == true
+		end
+		if mineHere then
+			for _, p in coasts do
+				table.insert(shore, p)
+			end
+		end
+	end
+	for _, c in ranked(shore) do
+		local factor = if ctx.grudge[c.id] then Bot.grudgeFactor(ctx.settings.attackRatio) else 1
+		if mySide >= c.men then
+			local members = Diplomacy.allianceMembers(state, c.id)
+			for _, stack in stacks do
+				local party = landingParty(ctx, stackTroops(stack), ships * Config.Navy.ShipCapacity)
+				for _, p in c.front do
+					if aboveRatio(ctx, p, party, localDefence(ctx, p, members), factor) then
+						return try(ctx, { kind = "Diplomacy", action = "War", target = c.id, gold = 0 })
+					end
+				end
+			end
+		end
+	end
+	return nil
+end
+
+-- Two stacks that can take an enemy province together but not alone strike it from two sides (docs/DESIGN.md
+-- "Bot AI"): they march in on the same tick from two neighbours of it, so they arrive together from two directions
+-- and flank (strikeTogether); free stacks first take up places there (takePlaces).
+
+-- Enemy land with enemy armies in it that my armies may march into now.
+local function pincerTarget(ctx: Ctx, p: number): boolean
+	local owner = ctx.state.provinces[p].owner
+	return owner ~= nil
+		and ctx.isEnemy[owner] == true
+		and #hostileAt(ctx, p) > 0
+		and mayInvade(ctx, p)
+		and not ctx.targeted[p]
+		and (rivalsAt(ctx, p)) == 0
+end
+
+-- Neither stack takes the province alone, both together do (standing in two places, they count as two directions).
+local function together(ctx: Ctx, p: number, a: Stack, b: Stack): boolean
+	local theirs = hostileAt(ctx, p)
+	if aboveRatio(ctx, p, a.armies, theirs) or aboveRatio(ctx, p, b.armies, theirs) then
+		return false
+	end
+	local both = table.clone(a.armies)
+	for _, army in b.armies do
+		table.insert(both, army)
+	end
+	return aboveRatio(ctx, p, both, theirs)
+end
+
+-- Two of these stacks standing next to the same province strike it together.
+local function strikeTogether(ctx: Ctx, stacks: { Stack }): { Command }?
+	local checks = 0
+	for i, a in stacks do
+		for _, p in ctx.state.provinces[a.location].neighbors do
+			if pincerTarget(ctx, p) then
+				for k = i + 1, #stacks do
+					local b = stacks[k]
+					if b.location ~= a.location and table.find(ctx.state.provinces[p].neighbors, b.location) then
+						checks += 1
+						if together(ctx, p, a, b) then
+							local commands = moveStack(a, p)
+							for _, command in moveStack(b, p) do
+								table.insert(commands, command)
+							end
+							return tryAll(ctx, commands)
+						elseif checks >= Config.Bots.MaxRouteChecks then
+							return nil
+						end
+					end
+				end
+			end
+		end
+	end
+	return nil
+end
+
+-- My two biggest free stacks walk to two different neighbours of the nearest province they can take together (clear
+-- of enemies, the nearest such place for each); the next plans strike once both stand there.
+local function takePlaces(ctx: Ctx): { Command }?
+	local stacks = freeStacks(ctx)
+	if #stacks < 2 then
+		return nil
+	end
+	local a, b = stacks[1], stacks[2]
+	local order, distA = reachable(ctx, a.location)
+	local _, distB = reachable(ctx, b.location)
+	-- the nearest neighbour of p a stack can reach and stand in, other than `taken`
+	local function place(p: number, dist: { [number]: number }, taken: number?): number?
+		local best: number?, bestD = nil, math.huge
+		for _, n in ctx.state.provinces[p].neighbors do
+			local d = dist[n]
+			if d and d < bestD and n ~= taken and #hostileAt(ctx, n) == 0 then
+				best, bestD = n, d
+			end
+		end
+		return best
+	end
+	local checks = 0
+	for _, p in order do
+		if distB[p] and pincerTarget(ctx, p) then
+			checks += 1
+			local atA = place(p, distA, nil)
+			local atB = place(p, distB, atA)
+			if atA == nil or atB == nil then
+				atB = place(p, distB, nil)
+				atA = if atB then place(p, distA, atB) else nil
+			end
+			if atA and atB and together(ctx, p, a, b) then
+				local commands: { Command } = {}
+				for _, step in { { stack = a, to = atA }, { stack = b, to = atB } } do
+					if step.stack.location ~= step.to then
+						if clearRoute(ctx, step.stack.armies[1], step.to) == nil then
+							return nil
+						end
+						for _, command in moveStack(step.stack, step.to) do
+							table.insert(commands, command)
+						end
+					end
+				end
+				return tryAll(ctx, commands)
+			elseif checks >= Config.Bots.MaxRouteChecks then
+				return nil
 			end
 		end
 	end
@@ -980,6 +1442,21 @@ local function attack(ctx: Ctx): { Command }?
 			end
 		end
 	end
+	-- two stacks (guards or free) standing on two sides of a province they can take together strike it now
+	local ready: { Stack } = {}
+	for _, key in keys do
+		local stack = guardStacks[key]
+		if Battle.morale(stack.armies) >= Config.Bots.MinAttackMorale then
+			table.insert(ready, stack)
+		end
+	end
+	for _, stack in freeStacks(ctx) do
+		table.insert(ready, stack)
+	end
+	local struck = strikeTogether(ctx, ready)
+	if struck then
+		return struck
+	end
 	-- free stacks march on the nearest enemy province they can take (Hard: the leading player's first)
 	local focus = if ctx.settings.targetsLeadingPlayer then leadingPlayer(ctx) else nil
 	if focus and not ctx.isEnemy[focus] then
@@ -1014,11 +1491,24 @@ local function attack(ctx: Ctx): { Command }?
 			end
 		end
 	end
-	-- my enemies are out of reach (far away, or left with no land): find a new war nearby
+	-- no stack can take a province alone: two of them take up places on two sides of one they can take together
+	local placed = takePlaces(ctx)
+	if placed then
+		return placed
+	end
+	-- my enemies are out of reach (far away, or left with no land): find a new war nearby. One across a sea we
+	-- share is in reach while I can have ships (the Sea step lands there).
 	for _, id in ctx.mine do
 		for _, n in state.provinces[id].neighbors do
 			local owner = state.provinces[n].owner
 			if owner and ctx.isEnemy[owner] then
+				return nil
+			end
+		end
+	end
+	if seaEnabled(ctx) and landingShips(ctx) >= 1 then
+		for _, e in ctx.enemies do
+			if Diplomacy.sharesSea(state, ctx.me, e) then
 				return nil
 			end
 		end
@@ -1039,7 +1529,313 @@ local function gather(ctx: Ctx): { Command }?
 	return nil
 end
 
--- 5. Build -----------------------------------------------------------------------------------------------
+-- 5. Sea -------------------------------------------------------------------------------------------------
+-- Land my armies can't walk to (bestLanding): ships at the port nearest my free stack, my spare fleets sailing
+-- there too, then the stack embarks; once everyone is aboard the fleet lands them (fleetOrders). One landing at a
+-- time. Ships keep the upkeep reserve, their upkeep stays under the difficulty's navyGoldShare of my gold income,
+-- and one landing gets at most its fleetShips.
+
+-- Gather `need` ships in my port's zone, then embark the stack for `target`: the commands for this plan, if any.
+local function prepareLanding(
+	ctx: Ctx,
+	memory: Memory,
+	stack: Stack,
+	target: number,
+	port: number,
+	zone: number,
+	need: number
+): { Command }?
+	local state = ctx.state
+	memory.seaZone, memory.seaUntil = zone, state.tick + Config.Bots.SeaPrepareTicks
+	local here: Fleet? = nil
+	local coming = 0
+	local spares: { Fleet } = {}
+	for _, f in ctx.fleets do
+		if spareFleet(ctx, f) then
+			if f.zone == zone and Navy.idle(f) then
+				here = here or f
+			elseif Navy.destination(f) == zone then
+				coming += Navy.ships(f)
+			elseif Navy.idle(f) then
+				table.insert(spares, f)
+			end
+		end
+	end
+	local have = if here then Navy.ships(here) else 0
+	if here and have >= need then
+		-- the walk to the fleet's coast must not run into a hostile army
+		local path = Pathing.nearest(state, ctx.me, stack.location, function(p)
+			return Navy.touches(state, p, zone)
+		end)
+		if path == nil then
+			return nil
+		end
+		for _, p in path do
+			if #hostileAt(ctx, p) > 0 then
+				return nil
+			end
+		end
+		local armies = table.clone(stack.armies)
+		table.sort(armies, function(a, b)
+			if a.men ~= b.men then
+				return a.men > b.men
+			end
+			return a.id < b.id
+		end)
+		local room = Navy.room(here)
+		local commands: { Command } = {}
+		for _, a in armies do
+			if room > 0 then
+				table.insert(commands, { kind = "Embark", army = a.id, fleet = here.id })
+				room -= a.men
+			end
+		end
+		local result = tryAll(ctx, commands)
+		if result then
+			memory.seaZone, memory.seaTarget = nil, target -- ready: the men walk to the fleet
+		end
+		return result
+	end
+	-- not enough ships there yet: my spare fleets sail over, and the port builds the rest when I can pay
+	local missing = need - have - coming
+	local commands: { Command } = {}
+	for _, f in spares do
+		if missing > 0 then
+			local route = Navy.route(state, f.zone, function(z)
+				return z == zone
+			end)
+			if route and routeSafe(ctx, route, f.hull) then
+				table.insert(commands, { kind = "Sail", fleet = f.id, zone = zone })
+				missing -= Navy.ships(f)
+			end
+		end
+	end
+	if missing > 0 then
+		local reserve = Config.Bots.UpkeepReserveMonths
+		local each = Config.Navy.ShipGold + reserve * Config.Navy.ShipUpkeep
+		local byGold = math.floor((ctx.nation.gold - reserve * ctx.upkeep) / each)
+		local ships = math.min(missing, byGold, Config.Navy.MaxShipsPerCommand)
+		if ships >= 1 then
+			table.insert(commands, { kind = "BuildShips", province = port, ships = ships })
+		end
+	end
+	return tryAll(ctx, commands)
+end
+
+local function sea(ctx: Ctx, memory: Memory): { Command }?
+	if not seaEnabled(ctx) or next(ctx.boarders) ~= nil then
+		return nil -- (an army walking to its fleet: that landing comes first)
+	end
+	for _, f in ctx.fleets do
+		if f.men > 0 then
+			return nil -- a landing under way
+		end
+	end
+	local maxShips = landingShips(ctx)
+	if maxShips < 1 then
+		return nil
+	end
+	for _, stack in freeStacks(ctx) do
+		local carried = math.min(stack.men, maxShips * Config.Navy.ShipCapacity)
+		local port = if carried >= Config.Army.MinArmyMen then nearestPort(ctx, stack.location) else nil
+		if port then
+			local zone = Navy.port(ctx.state, port) :: number
+			local need = math.ceil(carried / Config.Navy.ShipCapacity)
+			local party = landingParty(ctx, stackTroops(stack), carried)
+			local target = bestLanding(ctx, zone, party, need * Config.Navy.ShipHull, stack.armies[1])
+			if target then
+				return prepareLanding(ctx, memory, stack, target, port, zone, need)
+			end
+		end
+	end
+	return nil
+end
+
+-- Fleet orders ---------------------------------------------------------------------------------------------
+-- They spend nothing, so they ride along with the plan's command, at most one per fleet: land the men aboard once
+-- everyone has boarded (where they win, else on my nearest coast), contest an enemy blockade of my coast with my
+-- nearest empty fleet that beats the blockaders, blockade an enemy coast my armies besiege (its siege runs faster),
+-- and gather the other empty fleets (at the port of a landing being prepared, else at my home port) unless they
+-- blockade an enemy coast where they are. No fleet sails into a fleet it wouldn't beat (routeSafe).
+
+-- Does a coast of this zone belong to a nation at war with me (a fleet of mine there blockades it)?
+local function enemyCoast(ctx: Ctx, zone: number): boolean
+	for _, p in ctx.state.zones[zone].coasts do
+		local owner = ctx.state.provinces[p].owner
+		if owner and ctx.isEnemy[owner] then
+			return true
+		end
+	end
+	return false
+end
+
+-- My coast nearest by sea from this zone (lowest id on ties).
+local function homeCoast(ctx: Ctx, zone: number): number?
+	local dist = zoneDistances(ctx, zone)
+	local best: number?, bestD = nil, math.huge
+	for _, p in ctx.mine do
+		for _, z in Navy.shores(ctx.state, p) do
+			if dist[z] and dist[z] < bestD then
+				best, bestD = p, dist[z]
+			end
+		end
+	end
+	return best
+end
+
+local function fleetOrders(ctx: Ctx, memory: Memory, busy: { [number]: boolean }): { Command }
+	local out: { Command } = {}
+	if #ctx.fleets == 0 then
+		return out
+	end
+	local state = ctx.state
+	local function free(f: Fleet): boolean
+		return not busy[f.id] and not f.inBattle and not ctx.boarders[f.id]
+	end
+	local function order(command: Command, f: Fleet)
+		if try(ctx, command) then
+			table.insert(out, command)
+			busy[f.id] = true
+		end
+	end
+	local function safeRoute(f: Fleet, want: (number) -> boolean): { number }?
+		local route = Navy.route(state, f.zone, want)
+		return if route and routeSafe(ctx, route, f.hull) then route else nil
+	end
+	-- the zones my fleets are in or heading to
+	local headed: { [number]: boolean } = {}
+	for _, f in ctx.fleets do
+		headed[Navy.destination(f)] = true
+	end
+
+	-- 1. land the men aboard: where they embarked for if they still win there, else the best coast now, else home
+	local function reaches(f: Fleet, p: number): boolean
+		return safeRoute(f, function(z)
+			return Navy.touches(state, p, z)
+		end) ~= nil
+	end
+	for _, f in ctx.fleets do
+		if free(f) and f.men > 0 and Navy.idle(f) then
+			local party = landingParty(ctx, f.troops, f.men)
+			local meant = memory.seaTarget
+			memory.seaTarget = nil
+			local target = if meant and landingSpot(ctx, meant, party) and reaches(f, meant) then meant else nil
+			target = target or bestLanding(ctx, f.zone, party, f.hull, nil) or homeCoast(ctx, f.zone)
+			if target and reaches(f, target) then
+				order({ kind = "Land", fleet = f.id, province = target }, f)
+			end
+		end
+	end
+
+	-- 2. contest the blockades of my coasts
+	local contested: { [number]: boolean } = {}
+	for _, p in ctx.mine do
+		if state.provinces[p].blockade ~= nil then
+			for _, z in Navy.shores(state, p) do
+				if ctx.enemyHull[z] and not headed[z] then
+					contested[z] = true
+				end
+			end
+		end
+	end
+	for _, z in sortedKeys(contested) do
+		local best: Fleet?, bestLen = nil, math.huge
+		for _, f in ctx.fleets do
+			if free(f) and f.men == 0 and f.hull >= ctx.settings.attackRatio * ctx.enemyHull[z] then
+				local route = safeRoute(f, function(zz)
+					return zz == z
+				end)
+				if route and #route < bestLen then
+					best, bestLen = f, #route
+				end
+			end
+		end
+		if best then
+			order({ kind = "Sail", fleet = best.id, zone = z }, best)
+		end
+	end
+
+	-- 3. blockade the enemy coasts my armies besiege (empty fleets standing idle, not the landing's)
+	local landingZone = if memory.seaZone and state.tick < (memory.seaUntil or 0) then memory.seaZone else nil
+	local function idleSpare(f: Fleet): boolean
+		return free(f) and f.men == 0 and Navy.idle(f) and f.zone ~= landingZone
+	end
+	local besieged: { number } = {}
+	for _, a in ctx.myArmies do
+		local p = state.provinces[a.location]
+		local owner, siege, blockade = p.owner, p.siege, p.blockade
+		if
+			owner
+			and ctx.isEnemy[owner]
+			and siege
+			and Diplomacy.friendly(state, ctx.me, siege.by)
+			and (blockade == nil or not Diplomacy.friendly(state, ctx.me, blockade))
+			and table.find(besieged, a.location) == nil
+		then
+			local covered = false
+			for _, z in Navy.shores(state, a.location) do
+				covered = covered or headed[z] == true
+			end
+			if #Navy.shores(state, a.location) > 0 and not covered then
+				table.insert(besieged, a.location)
+			end
+		end
+	end
+	table.sort(besieged)
+	for _, p in besieged do
+		local best: Fleet?, bestRoute: { number }? = nil, nil
+		for _, f in ctx.fleets do
+			if idleSpare(f) then
+				local route = safeRoute(f, function(z)
+					return Navy.touches(state, p, z)
+				end)
+				if route and #route > 0 and (bestRoute == nil or #route < #bestRoute) then
+					best, bestRoute = f, route
+				end
+			end
+		end
+		if best and bestRoute then
+			local to = bestRoute[#bestRoute]
+			order({ kind = "Sail", fleet = best.id, zone = to }, best)
+			headed[to] = true
+		end
+	end
+
+	-- 4. gather the other empty fleets, unless they blockade an enemy coast where they stand
+	local gatherZone: number? = landingZone
+	local looked = landingZone ~= nil
+	for _, f in ctx.fleets do
+		if idleSpare(f) and not enemyCoast(ctx, f.zone) then
+			if not looked then
+				looked = true
+				local capital = ctx.nation.capital
+				local from = if ctx.isMine[capital] then capital else ctx.mine[1]
+				local port = if from then nearestPort(ctx, from) else nil
+				gatherZone = if port then Navy.port(state, port) else nil
+			end
+			local to = gatherZone
+			if to and f.zone ~= to and safeRoute(f, function(z)
+				return z == to
+			end) then
+				order({ kind = "Sail", fleet = f.id, zone = to }, f)
+			end
+		end
+	end
+	return out
+end
+
+-- The fleets a plan's commands already order (fleet orders leave them be).
+local function orderedFleets(state: MatchState, commands: { Command }): { [number]: boolean }
+	local busy: { [number]: boolean } = {}
+	for _, c in commands do
+		if c.kind == "Sail" or c.kind == "Land" or c.kind == "Embark" then
+			busy[Navy.resolve(state, c.fleet)] = true
+		end
+	end
+	return busy
+end
+
+-- 6. Build -----------------------------------------------------------------------------------------------
 
 local function build(ctx: Ctx): { Command }?
 	local state = ctx.state
@@ -1135,7 +1931,7 @@ local function build(ctx: Ctx): { Command }?
 	return try(ctx, command)
 end
 
--- 6. Diplomacy -------------------------------------------------------------------------------------------
+-- 7. Diplomacy -------------------------------------------------------------------------------------------
 
 local function hasOffer(ctx: Ctx, kind: string, from: number, to: number): boolean
 	for _, o in ctx.state.offers do
@@ -1300,7 +2096,7 @@ local function diplomacy(ctx: Ctx, memory: Memory): { Command }?
 	return nil
 end
 
--- 7. Primordial power ------------------------------------------------------------------------------------
+-- Primordial power (rides along) ------------------------------------------------------------------------------------
 -- A Meteor on the biggest army of a nation I'm at war with that isn't immune to powers right now (the same
 -- command a player sends). A charge never waits for a quiet moment: this step rides along with the plan's
 -- other command.
@@ -1449,10 +2245,14 @@ function Bot.plan(
 		or expand(ctx)
 		or attack(ctx)
 		or gather(ctx)
+		or sea(ctx, mem)
 		or build(ctx)
 		or diplomacy(ctx, mem)
 		or {}
-	local extra = social(ctx, mem)
+	local extra = if seaEnabled(ctx) then fleetOrders(ctx, mem, orderedFleets(state, commands)) else {}
+	for _, command in social(ctx, mem) do
+		table.insert(extra, command)
+	end
 	local power = primordial(ctx)
 	if power then
 		table.insert(extra, power[1])

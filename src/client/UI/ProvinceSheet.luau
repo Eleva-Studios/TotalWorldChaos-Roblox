@@ -9,6 +9,8 @@
 -- value, the development as the map's pip bar) and rows of slot tiles, five to a row: routine actions on calm slate
 -- tiles whose base says their group (build bronze, recruit green), decisions (war, ally, peace) in full colour.
 -- Every tile shows its price in gold (in red when you can't pay it) and greys out when it can't be done.
+-- With a living ally, a slate gem left of the close gem opens the ping wheel for the province (UI/Pings): the same
+-- wheel as a long press on the map, for players who never find the long press.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -17,6 +19,7 @@ ReplicatedStorage:WaitForChild("Shared")
 local Shared = ReplicatedStorage.Shared
 local Config = require(Shared.Config)
 local Economy = require(Shared.Sim.Economy)
+local Troops = require(Shared.Sim.Troops)
 local Snapshot = require(Shared.Snapshot)
 local Types = require(Shared.Types)
 
@@ -28,6 +31,7 @@ local RaceInfo = require(Client.RaceInfo)
 local Relations = require(Client.Relations)
 local MapRenderer = require(Client.MapRenderer)
 local Icons = require(script.Parent.Icons)
+local Pings = require(script.Parent.Pings)
 local Widgets = require(script.Parent.Widgets)
 
 local Theme = Widgets.Theme
@@ -42,6 +46,11 @@ local CHIP_GAP = Theme.space.s
 local PIP_SCALE = 2 -- the pip bar at the map's scale, in a well 10 px wider each side
 local LONG_CAPTION = 12 -- characters that fit a tile's caption at the kit's size; longer ones (troop names like
 -- "Crocodile guard") are set a size or two smaller
+local COUNTER_BADGE = 20 -- the counter badge on a recruit tile (the troop it beats): it sits on the tile's base at
+-- the bottom right, clear of the costs even on a 667 px phone's 102 px tiles; offsets from the tile's padded content
+-- box (Widgets.slotTile: 6 px each side, 12 px of base below), 4 px in from the right edge and 2 px up from the bottom
+local COUNTER_X = 2
+local COUNTER_Y = 10
 
 local TERRAIN_ICONS: { [string]: string } = { Plains = "farm", Forest = "tree", Hills = "hills", Mountain = "mountain" }
 local BUILDING_ICONS: { [string]: string } = { Farm = "farm", Barracks = "sword", Fort = "castle" }
@@ -51,6 +60,7 @@ local ProvinceSheet = {}
 
 local sheet: Frame
 local title: TextLabel
+local pingButton: TextButton
 local titleIcon: GuiObject
 local info: Frame
 local status: Frame
@@ -83,7 +93,7 @@ local function action(
 	enabled: boolean,
 	onPress: () -> (),
 	name: string?
-)
+): TextButton
 	local size = Vector2.new(grids[1].CellSize.X.Offset, Widgets.TILE_HEIGHT)
 	local b = Widgets.slotTile(row, icon, caption, costs, size, style, onPress, name)
 	b.LayoutOrder = #row:GetChildren()
@@ -93,6 +103,75 @@ local function action(
 	if not enabled then
 		Widgets.setEnabled(b, false)
 	end
+	return b
+end
+
+-- Counters (docs/DESIGN.md "Troops"): the role shares of the enemy armies (nations at war with me) in a province and
+-- next to it, or nil when there are none.
+local function enemyMix(provinceId: number, me: number): { [string]: number }?
+	local snap, map = ClientState.snapshot(), ClientState.map()
+	if snap == nil or map == nil then
+		return nil
+	end
+	local near = { [provinceId] = true }
+	for _, n in map.provinces[provinceId].neighbors do
+		near[n] = true
+	end
+	local men: Types.Composition = {}
+	local any = false
+	for _, a in snap.armies do
+		if near[a.location] and a.owner ~= 0 and Relations.atWar(me, a.owner) then
+			any = true
+			for troop, n in Troops.decode(a.troops) do
+				men[troop] = (men[troop] or 0) + n
+			end
+		end
+	end
+	return if any then Troops.roleShares(men) else nil
+end
+
+-- What the counter badges would say for this province now ("" without enemies near): re-render when it changes.
+local shownHints = ""
+local function hintKey(provinceId: number): string
+	local me = ClientState.myNation()
+	local mix = if me ~= 0 then enemyMix(provinceId, me) else nil
+	if mix == nil then
+		return ""
+	end
+	local parts = {}
+	for _, role in Troops.ROLES do
+		table.insert(parts, Troops.counterHint(role, mix, Config.Bots.CounterMinScore) or "-")
+	end
+	return table.concat(parts, ",")
+end
+
+-- A recruit tile's counter badge: the icon of the troop of my roster it beats, on the tile's base at the bottom right. Green when it is
+-- the pick against the enemy armies near this province, red when they beat it (the rule bots use:
+-- Troops.counterHint). Attributes Beats (the troop) and Hint ("good", "bad" or "") for the harness.
+local function counterBadge(tile: GuiObject, troop: string, race: string, mix: { [string]: number }?)
+	local role = Troops.role(troop :: Types.Troop)
+	local beatsRole = if role then Troops.beats(role) else nil
+	local beaten = if beatsRole then Troops.ofRole(race :: Types.Race, beatsRole) else nil
+	if role == nil or beaten == nil then
+		return -- elites and specials beat nothing
+	end
+	local hint = if mix then Troops.counterHint(role, mix, Config.Bots.CounterMinScore) else nil
+	local color = if hint == "good"
+		then Theme.color.emerald
+		elseif hint == "bad" then Theme.color.crimson
+		else Theme.color.slate
+	local b = Widgets.badge(tile, "", color)
+	b.Name = "Counter"
+	b.AutomaticSize = Enum.AutomaticSize.None
+	b.Size = UDim2.fromOffset(COUNTER_BADGE, COUNTER_BADGE)
+	b.AnchorPoint = Vector2.new(1, 1)
+	b.Position = UDim2.new(1, COUNTER_X, 1, COUNTER_Y)
+	b:SetAttribute("Beats", beaten)
+	b:SetAttribute("Hint", hint or "")
+	local icon = Icons.label(b, RaceInfo.troopIcon(beaten), Theme.size.icon)
+	icon.AnchorPoint = Vector2.new(0.5, 0.5)
+	icon.Position = UDim2.fromScale(0.5, 0.5)
+	icon.ZIndex = 5
 end
 
 -- A cost you may not be able to pay: { icon, number, "short" when `have` is under `need` }.
@@ -263,6 +342,7 @@ local function render()
 		return
 	end
 	local provinceId: number = id -- non-optional copy for the button callbacks
+	shownHints = hintKey(provinceId)
 	local def = map.provinces[provinceId]
 	local owner = ClientState.nation(record.owner)
 	local me = ClientState.nation(ClientState.myNation())
@@ -273,6 +353,7 @@ local function render()
 
 	title.Text = def.name
 	Icons.set(titleIcon, if def.isCapital then "crown" else TERRAIN_ICONS[def.terrain] or "flag")
+	pingButton.Visible = me ~= nil and def.terrain ~= "Mountain" and Pings.hasAllies()
 
 	-- the info chips: terrain, owner (your relation with it, else its race), development, building
 	Widgets.clear(info)
@@ -366,13 +447,15 @@ local function render()
 			)
 		end
 		-- one regiment of each troop of your race's roster: line, ranged, fast, elite and special, each button named
-		-- "Recruit_<troop id>" (the tutorial and the harness look for them)
+		-- "Recruit_<troop id>" (the tutorial and the harness look for them); the line, ranged and fast tiles show the
+		-- troop each beats, and which one to pick against the enemy armies near here
+		local mix = enemyMix(provinceId, me.id)
 		for _, troop in RaceInfo.troops(me.race) do
 			local recruitGold, recruitManpower = Economy.recruitCost(1, troop)
 			local manpowerText = if recruitManpower % 1000 == 0
 				then recruitManpower // 1000 .. "k"
 				else tostring(recruitManpower) -- Berserkers: 750
-			action(
+			local tile = action(
 				recruitRow,
 				RaceInfo.troopIcon(troop),
 				RaceInfo.troopName(troop),
@@ -387,6 +470,7 @@ local function render()
 				end,
 				"Recruit_" .. troop
 			)
+			counterBadge(tile, troop, me.race, mix)
 		end
 	end
 	-- your armies standing here: tap to pick one up and send it somewhere (last in the build row, by the thumb)
@@ -503,7 +587,7 @@ function ProvinceSheet.init(closeHandler: () -> (), selectArmyHandler: (number) 
 	Widgets.list(sheet, false, Theme.space.m)
 
 	-- the province's name on a title plate on the sheet's top edge, the close gem on its corner
-	local _, plate = Widgets.header(sheet, "", "flag", function()
+	local header, plate = Widgets.header(sheet, "", "flag", function()
 		ProvinceSheet.show(nil)
 		if onClose then
 			onClose()
@@ -511,6 +595,28 @@ function ProvinceSheet.init(closeHandler: () -> (), selectArmyHandler: (number) 
 	end)
 	title = plate
 	titleIcon = title:FindFirstChild("Icon") :: GuiObject
+
+	-- the ping gem, left of the close gem: the sheet closes and the wheel opens over the province
+	pingButton = Widgets.iconButton(header, "flag", "PingButton", Widgets.BUTTON_HEIGHT, Widgets.BUTTON_OFF, function()
+		local id = selected
+		if id then
+			ProvinceSheet.show(nil)
+			if onClose then
+				onClose()
+			end
+			Pings.openFor(id)
+		end
+	end)
+	pingButton.ZIndex = 3
+	pingButton.Visible = false
+	local close = header:FindFirstChild("✕")
+	if close and close:IsA("GuiObject") then
+		local function placePing()
+			pingButton.Position = close.Position - UDim2.fromOffset(Widgets.BUTTON_HEIGHT + GAP, 0)
+		end
+		placePing()
+		close:GetPropertyChangedSignal("Position"):Connect(placePing)
+	end
 
 	info = chipRow(2, "Info")
 	status = chipRow(3, "Status")
@@ -562,6 +668,8 @@ function ProvinceSheet.init(closeHandler: () -> (), selectArmyHandler: (number) 
 		for _, r in delta.provinces do
 			relevant = relevant or r.id == selected
 		end
+		-- and when the recruit tiles' counter hints change (enemy armies came or left)
+		relevant = relevant or (#delta.armies > 0 or #delta.removedArmies > 0) and hintKey(selected) ~= shownHints
 		if relevant then
 			render()
 		end

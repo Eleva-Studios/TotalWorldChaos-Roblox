@@ -7,6 +7,7 @@
 -- Player it requires. Custom field values are short strings (map ids, nation slots, buckets, item ids).
 
 local Config = require("../Config")
+local Diplomacy = require("./Diplomacy")
 local Progression = require("./Progression")
 local Types = require("../Types")
 
@@ -42,9 +43,11 @@ Telemetry.CUSTOM_EVENTS = {
 	"menu_shown",
 	"menu_choice",
 	"first_pick",
+	"ping_sent",
 	-- the EU4 pack (docs/DESIGN.md)
 	"diplomacy_action",
 	"event_card",
+	"music_setting",
 	"mission",
 }
 
@@ -367,6 +370,25 @@ function Telemetry.powerUsed(state: MatchState, userId: number, power: string): 
 	return Telemetry.custom("primordial_power_used", 1, { power, state.mapId, kind }, userId)
 end
 
+-- A player pinged a province for their allies (Sim.Pings): the kind, the map, and whose province it is to the
+-- sender: own, ally, enemy (at war with the sender) or neutral (unowned land, or a nation at peace with them).
+function Telemetry.pingSent(state: MatchState, userId: number, kind: string, province: number): Event
+	local sender = 0
+	for id, nation in state.nations do
+		if nation.userId == userId and not nation.eliminated then
+			sender = id
+		end
+	end
+	local p = state.provinces[province]
+	local owner = if p then p.owner or 0 else 0
+	local target = if owner ~= 0 and owner == sender
+		then "own"
+		elseif Diplomacy.allied(state, sender, owner) then "ally"
+		elseif Diplomacy.atWar(state, sender, owner) then "enemy"
+		else "neutral"
+	return Telemetry.custom("ping_sent", 1, { string.lower(kind), state.mapId, target }, userId)
+end
+
 -- The sandbox ---------------------------------------------------------------------------------------------------
 
 -- A sandbox world started for a player: start is "first" (they just arrived) or "new_world" (they made another).
@@ -457,6 +479,17 @@ function Telemetry.mission(state: MatchState, userId: number, outcome: Types.Mis
 		{ outcome.kind, state.mapId, if outcome.done then "done" else "expired" },
 		userId
 	)
+end
+
+-- The speaker ----------------------------------------------------------------------------------------------------
+
+-- A speaker toggle changed (RequestPreference "music" or "sounds"): both toggles after the change ("on" or "off")
+-- and what the server was doing (Telemetry.menuWhere).
+function Telemetry.musicSetting(music: boolean, sounds: boolean, where: string, userId: number): Event
+	local function onOff(on: boolean): string
+		return if on then "on" else "off"
+	end
+	return Telemetry.custom("music_setting", 1, { onOff(music), onOff(sounds), where }, userId)
 end
 
 -- The map vote is over: one map_vote per voter. round: "lobby" (the first vote on this server) or "next" (after

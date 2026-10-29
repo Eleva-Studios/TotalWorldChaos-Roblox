@@ -6,6 +6,7 @@
 -- Any other province -> its sheet. Someone else's army -> the sheet of the province it stands in; someone else's
 -- fleet -> its sheet (no orders). Empty space or the water -> close everything.
 -- While a Primordial power waits for a target, every tap goes to the power instead.
+-- A long press (or right-click) on a province opens the ping wheel for your allies (UI/Pings).
 
 -- Roblox's own player list would open over the HUD's right end on PC; the game has its own (🌍).
 pcall(function()
@@ -28,8 +29,10 @@ local MapView = require(Client.MapView)
 local MapVote = require(Client.UI.MapVote)
 local Menu = require(Client.UI.Menu)
 local MissionStrip = require(Client.UI.Missions)
+local Music = require(Client.Music)
 local Nations = require(Client.UI.Nations)
 local Offers = require(Client.UI.Offers)
+local Pings = require(Client.UI.Pings)
 local Powers = require(Client.UI.Powers)
 local PrivateSettings = require(Client.UI.PrivateSettings)
 local ProfileState = require(Client.ProfileState)
@@ -365,6 +368,23 @@ Intents.init(Hud.toast)
 MapView.init(function(screenPos: Vector2)
 	onTap(MapRenderer.pick(screenPos))
 end)
+-- A long press (or right-click) on a province, or an army standing in one, opens the ping wheel there. While the
+-- draft or a power waits for a target, it is a tap like any other.
+Pings.init(Hud.toast)
+MapView.onLongPress(function(screenPos: Vector2)
+	local kind, id = MapRenderer.pick(screenPos)
+	if Draft.active() or Powers.targeting() then
+		onTap(kind, id)
+		return
+	end
+	if kind == "Army" and id then
+		local army = ClientState.army(id)
+		kind, id = "Province", if army then army.location else nil
+	end
+	if kind == "Province" and id then
+		Pings.open(id, screenPos)
+	end
+end)
 MapVote.init()
 PrivateSettings.init()
 Draft.init()
@@ -381,6 +401,7 @@ Trophies.init()
 Emotes.init()
 Effects.init() -- after MapRenderer: draws on the canvas it builds
 Sounds.init() -- after every other UI: hooks a tap sound onto their buttons
+Music.init() -- follows the menu, the Lobby and the match from here on
 Ads.init() -- the notification opt-in prompt after the first finished match
 ProfileState.init()
 ShopState.init()

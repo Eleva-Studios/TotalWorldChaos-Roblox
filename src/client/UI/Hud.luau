@@ -23,11 +23,13 @@ local Client = script.Parent.Parent
 local ClientState = require(Client.ClientState)
 local Cosmetics = require(Client.Cosmetics)
 local LobbyState = require(Client.LobbyState)
+local MapBadges = require(Client.MapBadges)
 local ProfileState = require(Client.ProfileState)
 local Relations = require(Client.Relations)
 local Sounds = require(Client.Sounds)
 local HudLayout = require(script.Parent.HudLayout)
 local Icons = require(script.Parent.Icons)
+local Speaker = require(script.Parent.Speaker)
 local Widgets = require(script.Parent.Widgets)
 
 local Theme = Widgets.Theme
@@ -344,10 +346,9 @@ local function eventText(e: Types.MatchEvent): string?
 			return "🏳 " .. nationName(e.a) .. " took " .. provinceName(e.province) .. "!"
 		end
 	elseif e.kind == "BattleEnded" then
-		if e.a == me then
-			return "🎉 Battle won at " .. provinceName(e.province)
-		elseif e.b == me then
-			return "💀 Battle lost at " .. provinceName(e.province)
+		-- what decided it, when it was a flank or a side breaking (docs/DESIGN.md "Armies and combat")
+		if e.a == me or e.b == me then
+			return MapBadges.battleText(e.a == me, provinceName(e.province), e.flank == true, e.broke == true)
 		end
 	elseif e.kind == "Offer" and e.b == me then
 		return "📜 " .. nationName(e.a) .. " sent you an offer"
@@ -506,7 +507,8 @@ function Hud.init(onCapitalButton: () -> (), onNationsButton: () -> (), onShopBu
 	if onShopButton then
 		add(barButton("ShopButton", "cart", onShopButton), 5, ITEM, 0, ITEM, true)
 	end
-	-- sound on and off for the session (docs/DESIGN.md "Sound and effects")
+	-- the speaker: its popover has the Music and Sounds toggles, saved in the profile (docs/DESIGN.md "Sound and
+	-- effects"); muted when both are off
 	local mute = barButton("Mute", "soundOn", function() end)
 	add(mute, 5, ITEM, 0, ITEM, true)
 	local muteIcon = mute:FindFirstChild("Icon") :: GuiObject
@@ -514,6 +516,7 @@ function Hud.init(onCapitalButton: () -> (), onNationsButton: () -> (), onShopBu
 		Icons.set(muteIcon, if muted then "soundOff" else "soundOn")
 		mute:SetAttribute("Muted", muted)
 	end)
+	Speaker.attach(mute)
 
 	toastLabel = Widgets.toast(gui, 0, TOAST_WIDTH)
 	place()

@@ -144,9 +144,10 @@ function Navy.destination(fleet: Fleet): number
 end
 
 -- Who sees which fleet: the viewer's own and its allies', and the others in a zone it sees while the fog of war is on
--- (Sim.Fog; everyone sees every fleet with it off). Bots ask here before they act on a fleet they don't own.
-function Navy.visible(state: MatchState, viewer: number, fleet: Fleet): boolean
-	return Fog.seesFleet(Fog.vision(state, viewer), fleet)
+-- (Sim.Fog; everyone sees every fleet with it off). Bots ask here before they act on a fleet they don't own, with the
+-- vision they worked out for the plan (else it is worked out here).
+function Navy.visible(state: MatchState, viewer: number, fleet: Fleet, vision: Fog.Vision?): boolean
+	return Fog.seesFleet(vision or Fog.vision(state, viewer), fleet)
 end
 
 -- Zones and coasts ---------------------------------------------------------------------------------------------

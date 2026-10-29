@@ -746,12 +746,33 @@ Config.Casts = {
 }
 
 Config.Battle = {
-	Rounds = 3,
+	Rounds = 3, -- at most: a side whose morale breaks retreats sooner
 	KillRatePerRound = 0.15, -- each side kills this × its own strength × modifiers
 	TerrainDefenceBonus = 0.25, -- defender in forest or hills
 	UnderdogBonus = 0.5, -- a defending underdog holds like a fort (docs/BALANCE.md 5)
 	CoalitionBonus = 0.3,
 	RandomSpread = 0.1, -- ± per battle
+	-- Troop counters (docs/DESIGN.md "Troops"): each role beats the one it names. Each round a troop type's damage is
+	-- × (1 + CounterBonus × the share of enemy men it beats − CounterPenalty × the share of enemy men that beats it).
+	-- Elite and special troops are neutral.
+	Counters = { ranged = "line", line = "fast", fast = "ranged" },
+	CounterBonus = 0.25,
+	CounterPenalty = 0.25,
+	-- Morale (docs/DESIGN.md "Armies and combat"): whole points from 0 to MoraleMax. A round costs a side MoraleShock ×
+	-- the share of its men it lost that round + MoraleDrain; a side at MoraleBreak or under breaks and retreats at once.
+	-- Out of battle, every MoraleRecoverTicks ticks an army gets MoraleRecoverHome on its own land (garrisons and
+	-- Rebels: neutral land) and MoraleRecoverAbroad elsewhere.
+	MoraleMax = 100,
+	MoraleShock = 100,
+	MoraleDrain = 5,
+	MoraleBreak = 0,
+	MoraleRecoverTicks = 5,
+	MoraleRecoverHome = 10,
+	MoraleRecoverAbroad = 5,
+	-- Flanking: a side whose armies came into the battle from 2+ directions gets FlankBonus per extra direction, for at
+	-- most FlankMaxExtra extra directions
+	FlankBonus = 0.25,
+	FlankMaxExtra = 2,
 }
 
 Config.Siege = {
@@ -761,8 +782,8 @@ Config.Siege = {
 }
 
 -- Navies (docs/DESIGN.md "Navies"): one ship type per map (Galleon, Dragonship, Starship; MapDef.ship), the same
--- numbers on every map. A sea battle is a land battle's rule with a fleet's hull as its men. First numbers, to be
--- tuned with bot tournaments once bots sail (navies stage 3).
+-- numbers on every map. A sea battle is a land battle's rule with a fleet's hull as its men. Tuned with bot
+-- tournaments once bots sailed: docs/BALANCE.md section 23.
 Config.Navy = {
 	ShipGold = 25, -- one ship (no manpower)
 	ShipUpkeep = 1, -- gold per ship per month (a damaged fleet pays for what is left of it)
@@ -771,7 +792,7 @@ Config.Navy = {
 	MaxShipsPerCommand = 5, -- ships in one BuildShips order
 	MoveTicks = 8, -- to sail into the next sea zone
 	MinHull = 500, -- a fleet left with less than half a ship sinks after a battle, with everyone aboard
-	BlockadeGoldLoss = 0.5, -- a blockaded province loses this share of its gold income
+	BlockadeGoldLoss = 0.25, -- a blockaded province loses this share of its gold income (0.5 before section 23)
 	BlockadeSiegeSpeed = 1.25, -- the blockader's side besieges a blockaded province this much faster
 }
 
@@ -918,7 +939,7 @@ Config.EventCards = {
 -- goal (done, out of time, or impossible) makes room for one of another kind RefillTicks later. Rewards are about
 -- 15-30 gold's worth (Config.Bots.EventWorth: 100 manpower = 1 gold, a regiment 15 in peace, 30 at war). Modest on
 -- purpose: about 6 goals done per nation per match, worth about 140 gold, half what the event cards' choices give
--- (docs/BALANCE.md section 22).
+-- (docs/BALANCE.md section 24).
 Config.Missions = {
 	Slots = 3, -- goals a nation has at a time
 	FirstTicks = 20, -- nation 1's first goals come this far into the match...
@@ -1343,14 +1364,49 @@ Config.Net = {
 	MaxShopIntentsPerSecond = 2, -- shop requests (buy, equip, emote, theme setting) on top of that, per player
 }
 
+-- Map pings (docs/NEXT_FEATURES.md 4, DESIGN.md "UI and controls"): Sim.Pings, Services/PingService, UI/Pings ----------
+
+Config.Pings = {
+	Kinds = { "Attack", "Defend", "Help", "Look" }, -- the four pings (icons war, powerShield, fire, eye), wheel order
+	LifeTicks = 8, -- seconds a ping stays on the allies' maps
+	CooldownTicks = 3, -- seconds between one nation's pings
+	MaxActive = 2, -- a sender's third live ping replaces its oldest
+	MaxPerMinute = 12, -- hard cap per nation in any MinuteTicks
+	MinuteTicks = 60,
+	LongPressSeconds = 0.45, -- hold a province this long (without panning) to open the ping wheel (client)
+}
+
 -- Bots -------------------------------------------------------------------------------------------
 
 Config.Bots = {
 	-- noPlayerWarTicks: no war declared on a player before this tick; targetsLeadingPlayer: wars go to the player
-	-- holding the most provinces first
-	Easy = { planTicks = 6, attackRatio = 1.6, noPlayerWarTicks = 8 * 60, targetsLeadingPlayer = false },
-	Normal = { planTicks = 3, attackRatio = 1.3, noPlayerWarTicks = 0, targetsLeadingPlayer = false },
-	Hard = { planTicks = 2, attackRatio = 1.1, noPlayerWarTicks = 0, targetsLeadingPlayer = true },
+	-- holding the most provinces first. At sea (docs/DESIGN.md "Bot AI"): navyGoldShare: its ships' upkeep stays
+	-- under this share of its gold income; fleetShips: ships for one landing (one front). attackRatio also decides
+	-- which fleets a bot dares to fight.
+	Easy = {
+		planTicks = 6,
+		attackRatio = 1.6,
+		noPlayerWarTicks = 8 * 60,
+		targetsLeadingPlayer = false,
+		navyGoldShare = 0.1,
+		fleetShips = 3,
+	},
+	Normal = {
+		planTicks = 3,
+		attackRatio = 1.3,
+		noPlayerWarTicks = 0,
+		targetsLeadingPlayer = false,
+		navyGoldShare = 0.15,
+		fleetShips = 5,
+	},
+	Hard = {
+		planTicks = 2,
+		attackRatio = 1.1,
+		noPlayerWarTicks = 0,
+		targetsLeadingPlayer = true,
+		navyGoldShare = 0.2,
+		fleetShips = 5,
+	},
 	Difficulty = "Normal", -- what every bot plays on (a private server's owner can pick another: Config.Private)
 	DefendRatio = 0.8,
 	MenPerProvince = 800,
@@ -1366,8 +1422,21 @@ Config.Bots = {
 	SpecialShare = 0.1,
 	EliteShare = 0.2,
 	FastShare = 0.1,
+	-- tactics (docs/DESIGN.md "Bot AI"): the troop that beats the enemy armies near my land (Troops.bestCounter of
+	-- their role shares, scoring at least CounterMinScore) while it is under CounterShare of my men; attack into a counter
+	-- (their troops' counter edge over mine above CounterEdge) only with CounteredExtraRatio more on the attack ratio;
+	-- armies under MinAttackMorale rest instead of expanding, attacking or marching to help
+	CounterShare = 0.35,
+	CounterMinScore = 0.15,
+	CounterEdge = 0.05,
+	CounteredExtraRatio = 0.3,
+	MinAttackMorale = 70,
 	OfferCooldownTicks = 90, -- a bot repeats an alliance or peace offer to the same nation at most this often
 	MaxRouteChecks = 6, -- paths checked per army per plan (keeps planning cheap)
+	MaxLandingChecks = 12, -- coasts weighed for one landing, nearest by sea first (keeps planning cheap)
+	MaxLandingZones = 2, -- a landing sails at most this many zones on from the port it leaves (no far colonies)
+	SeaPrepareTicks = 60, -- spare fleets keep gathering at the port of a landing being prepared this long after the
+	-- bot last worked on it (ships still to buy or to sail there)
 	-- insults (docs/DESIGN.md "Bot AI"): now and then a bot insults a rival, and an insulted bot answers back and leans
 	-- towards war with its insulter
 	InsultChance = 0.002, -- per plan (Normal bots plan every 3 s: about one insult per bot in a 25-minute match)
@@ -1439,6 +1508,18 @@ Config.Ads = {
 	QuestRerollRobux = 10, -- the "Quest reroll" developer product's price (Roblox wants an ad reward worth 3-10 Robux)
 	MinVoteSecondsLeft = 32, -- ads only start in the map vote with this long left (a video lasts 6-30 s): never the draft
 	NotificationPromptDelaySeconds = 2, -- back in the Lobby after the first finished match, wait this long, then ask
+}
+
+-- Music (docs/DESIGN.md "Sound and effects", docs/NEXT_FEATURES.md 6): src/client/Music, src/client/MusicMood ---------
+
+Config.Music = {
+	Volume = 0.35, -- the music's level (its AudioFader): under the sounds, which play at 0.35-0.7
+	FadeSeconds = 2.5, -- a mood change crossfades the old track out and the new one in over this long
+	MinMoodSeconds = 40, -- Peace and War never switch back within this long (a quick peace doesn't flip it twice)
+	BattleWindowSeconds = 30, -- in the War phase, War plays while at war or this long after a battle of yours
+	DuckVolume = 0.12, -- the music's level under the War and Cataclysm banners, so their sounds land
+	DuckSeconds = 2.6, -- how long it stays down (a banner shows for about this long)
+	DuckFadeSeconds = 0.3, -- down and back up again over this long
 }
 
 return Config

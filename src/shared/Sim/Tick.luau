@@ -11,6 +11,7 @@ local Match = require("./Match")
 local Missions = require("./Missions")
 local Movement = require("./Movement")
 local Navy = require("./Navy")
+local Pings = require("./Pings")
 local Primordial = require("./Primordial")
 local Rng = require("./Rng")
 local Siege = require("./Siege")
@@ -32,7 +33,8 @@ function Tick.advance(state: MatchState, rng: Rng.Rng): Types.Phase?
 	Movement.endAccess(state) -- 2: military access that ended sends the guests' armies home first...
 	Navy.step(state) -- ...fleets sail, armies board, fleets land...
 	Movement.step(state) -- ...then armies move and stacks merge
-	Battle.step(state, rng) -- 3: land battles, then sea battles
+	Battle.step(state, rng) -- 3: land battles (armies out of battle recover morale), then sea battles
+	Battle.recoverMorale(state)
 	Navy.battleStep(state, rng)
 	Navy.blockades(state) -- (before sieges and pay, which they speed up and cut)
 	Siege.step(state) -- 4
@@ -40,6 +42,7 @@ function Tick.advance(state: MatchState, rng: Rng.Rng): Types.Phase?
 		Economy.payMonth(state)
 	end
 	Primordial.step(state, rng) -- 6: eliminations, charges, effect timers, Cataclysm disasters
+	Pings.expire(state) -- (and old map pings, and a fallen sender's)
 	-- 7: bots (Phase 3)
 	Diplomacy.expire(state) -- 8: offers, insults' answer windows...
 	EventCards.step(state, rng) -- ...event cards (the default choice), then new cards...

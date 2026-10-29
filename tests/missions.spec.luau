@@ -409,7 +409,7 @@ T.test("the words: every goal short enough with the longest province name, and c
 	T.equal(MissionText.goal("Win", nil, 2), "Win 2 battles")
 	T.equal(MissionText.goal("Fort", nil, 1), "Build a fort")
 	T.equal(MissionText.goal("Take", "Kent", 1), "Take Kent")
-	-- a reward is gold, manpower or regiments only, about 15-30 gold's worth (modest: docs/BALANCE.md section 22)
+	-- a reward is gold, manpower or regiments only, about 15-30 gold's worth (modest: docs/BALANCE.md section 24)
 	local W = Config.Bots.EventWorth
 	for _, kind in Missions.KINDS do
 		local r = Missions.reward(kind)

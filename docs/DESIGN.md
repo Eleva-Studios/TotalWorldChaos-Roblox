@@ -306,10 +306,21 @@ The rosters (`Config.Troops`, `Config.Races`; `lune run tools/balance/rosters md
 | elite | Stormlords | 35 gold + 1,000 manpower | 3.5 | 2 | 1.5 | normal |
 | special | Ion storms | 18 gold + 750 manpower | 2 | 1.3 | 0.7 | normal; +40% against garrisons and Rebels |
 
+**Counters.** The line, ranged and fast troops of every race beat each other in a cycle; elites and specials are neutral (they keep their own tricks):
+
+| Role | Beats | Is beaten by |
+| --- | --- | --- |
+| ranged | line | fast |
+| line | fast | ranged |
+| fast | ranged | line |
+| elite, special | — | — |
+
+Each battle round a troop type's damage is × (1 + 25% × the share of enemy men it beats − 25% × the share of enemy men that beats it) (`Config.Battle` `Counters`, `CounterBonus`, `CounterPenalty`). Archers hitting an army of nothing but infantry deal +25%, cavalry −25%; against an army with all three the bonuses mostly cancel. So a mixed army is safe and a one-troop army can be punished. The recruit tiles show what each troop beats, and which one counters the enemy armies near the province (see "Armies and combat").
+
 - Upkeep is gold per regiment (1,000 men) per month. Normal speed: 5 s per plains province, 8 s forest and hills; fast: 3 s and 6 s.
 - The numbers were tuned with bot tournaments: `docs/BALANCE.md` sections 18 and 19.
 - Recruit buys whole regiments of one type into the army standing in the province (or a new one).
-- Battles: a side's strength is the sum of its men × each troop's attack (attacking side) or defence (defending side), with the specials' terrain and anti-garrison bonuses on their own men, times the modifiers. Losses split over an army's troop types in proportion to their men. Merging stacks adds the compositions.
+- Battles: a side's strength is the sum of its men × each troop's attack (attacking side) or defence (defending side), with the specials' terrain and anti-garrison bonuses and the counters on their own men, times the modifiers. Losses split over an army's troop types in proportion to their men. Merging stacks adds the compositions.
 - An army moves at its slowest troop's speed (retreating too).
 - A Meteor's 50% applies to every troop type. Neutral garrisons and Rebels are Earth's line infantry, on every map. A nation's army made without naming a troop (the tutorial's ready army) is its race's line troop. Every rule that counts men (retreats under 500, the bots' army sizes, the HUD) counts the total; quests, achievements, telemetry and the tutorial count every troop as a regiment.
 - Bots, quests, telemetry, the HUD and the tutorial go by role, never by a troop's name: bots raise their race's line, ranged, fast, elite and special troops (see "Bot AI"), and the tutorial's recruit step points at the player's line troop.
@@ -320,9 +331,13 @@ The rosters (`Config.Troops`, `Config.Races`; `lune run tools/balance/rosters md
 
 - An army is a stack of regiments of any troop types (its composition, see Troops) shown as one token on the map: a nation's armies that stand still in the same province (not marching, fighting or retreating) merge into one, and their compositions add up.
 - Movement: one province per 5 s on plains, 8 s on forest and hills; 3 s and 6 s for fast troops (every race's fast troop, and two elites: Knights and Horse archers). An army moves at its slowest troop's speed; a Forest race crosses forest at plains speed and a Swift race marches 15% faster. Paths follow province neighbours (BFS).
-- A battle starts when enemy armies share a province and lasts 3 rounds of 1 s. Each round, each side kills enemy men equal to 15% of its own strength × modifiers. Strength = the sum of its men × each troop's attack (attackers) or defence (defenders); losses split over troop types in proportion to their men.
-- Modifiers: defender in forest or hills +25%, fort +50%, underdog +50%, coalition +30%, a Forest race in a forest, a Hills race defending in hills, an Attack race attacking (each race's own numbers, see Races), a grudge against an insulter +10% or high spirits +5% (see Diplomacy), random ±10% per battle; a special's terrain or anti-garrison bonus counts for its own men only (see Troops).
-- After round 3 the side with fewer men retreats: it walks to its nearest owned province on the shortest path over land it may enter, at its own speed (its slowest troop's), under a 🏳 flag. On the way it takes no orders and doesn't fight, block a siege or besiege, and it walks on even if its way closes (a peace, military access ending), though not over a strait an enemy fleet holds; it is a normal army again when it arrives (or when such a strait stops it). Armies under 500 men are destroyed, and so is a loser with no way home.
+- A battle starts when enemy armies share a province and lasts up to 3 rounds of 1 s. Each round, each side kills enemy men equal to 15% of its own strength × modifiers. Strength = the sum of its men × each troop's attack (attackers) or defence (defenders), × its counter (see Troops); losses split over troop types in proportion to their men.
+- Modifiers: defender in forest or hills +25%, fort +50%, underdog +50%, coalition +30%, flanking (below), a Forest race in a forest, a Hills race defending in hills, an Attack race attacking (each race's own numbers, see Races), a grudge against an insulter +10% or high spirits +5% (see Diplomacy), random ±10% per battle; a special's terrain or anti-garrison bonus counts for its own men only (see Troops).
+- **Morale** (0–100, `Config.Battle`): every army has it, garrisons and Rebels too. New regiments start full; when armies merge (or regiments join an army) the morale is the average by men. Each battle round costs a side 100 × the share of its men it lost that round + 5 (losing 15% of its men costs 20, rounded to whole points), the same for each of its armies. A side's morale is its armies' average by men; when it reaches 0 the side **breaks** and retreats at once, even before round 3 and even with more men. Two fresh armies of the same size end round 3 at 40, so an even fight still goes the distance; a fresh army breaks early only when it is outnumbered about 2.5 to 1, and a tired one much sooner. Out of battle morale comes back in steps: +10 every 5 s on its own land (neutral land for garrisons and Rebels), +5 elsewhere, so a recovering army's record changes once every 5 s. A fresh army beats a tired one of the same size: the tired one breaks first.
+- **Flanking:** each army in a battle came in from one direction: the province it stepped in from, or the battle's province for an army that was already standing there (defenders at home, besiegers, armies just raised or landed). A side whose armies came from 2 or more different directions gets +25% per extra direction, at most +50% (`FlankBonus`, `FlankMaxExtra`): striking from two sides is worth a defender's forest or hills, from three sides a fort. An army that joins a battle in progress counts from its round on.
+- **Result**, after every round: a side with no men left loses; a side that broke loses (both broke: the lower morale); after round 3 the side with fewer men loses (a tie goes to the defender). The loser retreats: it walks to its nearest owned province on the shortest path over land it may enter, at its own speed (its slowest troop's), under a 🏳 flag. On the way it takes no orders and doesn't fight, block a siege or besiege, and it walks on even if its way closes (a peace, military access ending), though not over a strait an enemy fleet holds; it is a normal army again when it arrives (or when such a strait stops it). Armies under 500 men are destroyed, and so is a loser with no way home (a beaten garrison always is).
+- The battle's toasts say what decided it: the enemy broke ("They broke at…"), your army broke, or a flank. A flank (or the counters) "decided" a battle when, without the kills and morale it took, the other side would have won (`Battle.step` keeps that account for each side; `BattleEnded` carries `broke`, `flank`, `counter` and `outnumbered`).
+- Rules: `Sim/Battle.luau` (counters: `Sim/Troops.luau`); numbers: `Config.Battle`; balance: `docs/BALANCE.md` section 22.
 
 ### Sieges
 
@@ -359,7 +374,7 @@ The rules:
 
 ### Events
 
-**Events with choices** (the EU4 pack, stage 2, Paradox-style). A match setting, `events`, on by default (`Config.Features.Events`); a private server's owner can turn it off (the "Events" switch, beside "Insults" on one row of the settings sheet). Off isn't a custom rule (full rewards): every nation gets the same small gifts, so a match without them is no easier. Rules: `Sim/EventCards.luau`; numbers and the pool: `Config.EventCards`; the words: `Shared/Flavour/EventCards.luau`; balance: `docs/BALANCE.md` section 21. The tutorial match has none.
+**Events with choices** (the EU4 pack, stage 2, Paradox-style). A match setting, `events`, on by default (`Config.Features.Events`); a private server's owner can turn it off (the "Events" switch, under "Insults" on the settings sheet's Rules tab). Off isn't a custom rule (full rewards): every nation gets the same small gifts, so a match without them is no easier. Rules: `Sim/EventCards.luau`; numbers and the pool: `Config.EventCards`; the words: `Shared/Flavour/EventCards.luau`; balance: `docs/BALANCE.md` section 21. The tutorial match has none.
 
 - **The card:** every few minutes each living nation gets an event card: a title, one line of flavour, the province it's about (when a choice lands in one) and two choices with clear effects, shown as icon chips: gold, manpower (a negative amount is a cost), a level of development in the card's province, regiments of your race's line troop raised there, a ship launched into its port zone, or a timed income boost (+20–25% gold for 2 minutes; the best one counts, they don't stack). One or two effects a choice; about 50 gold's worth (100 manpower = 1 gold, a level of development 60), the same for everyone.
 - **Timing:** nation 1's first card comes at 2:00, each next nation's 3 s later (they don't all land at once); the next one comes 3 minutes after a card closes, so about 7 a match. Cards come in Peace, War and the Cataclysm, not on Results.
@@ -372,7 +387,7 @@ The rules:
 
 ### Missions
 
-**Missions** (the EU4 pack, stage 3). A match setting, `missions`, on by default (`Config.Features.Missions`); a private server's owner can turn it off ("Missions", beside "Fog" on the settings sheet's second row of EU4-pack switches). Off isn't a custom rule (full rewards): every nation gets the same goals, so a match without them is no easier. Rules: `Sim/Missions.luau`; numbers: `Config.Missions`; the words: `Shared/Flavour/Missions.luau`; balance: `docs/BALANCE.md` section 22. The tutorial match has none.
+**Missions** (the EU4 pack, stage 3). A match setting, `missions`, on by default (`Config.Features.Missions`); a private server's owner can turn it off ("Missions" on the settings sheet's More tab, above "Fog"). Off isn't a custom rule (full rewards): every nation gets the same goals, so a match without them is no easier. Rules: `Sim/Missions.luau`; numbers: `Config.Missions`; the words: `Shared/Flavour/Missions.luau`; balance: `docs/BALANCE.md` section 24. The tutorial match has none.
 
 - **Goals:** every living nation has three short, concrete goals at a time, each of another kind, with a clear, modest reward (about 15–30 gold's worth, counted the way bots value event cards: 100 manpower = 1 gold, a regiment 15 gold in peace and 30 at war):
   - **Take** a named province next to your land (in Peace a neutral one; from War on anyone's but an ally's or a truce partner's): 30 gold.
@@ -381,7 +396,7 @@ The rules:
   - **Win 8 battles** (a neutral garrison counts): 1 regiment of your race's line troop at your capital.
   - **Join an alliance** (only for a nation in none): 25 gold.
 - **Timing:** nation 1's first goals come 20 s into the match, each next nation's 1 s later, in Peace, War and the Cataclysm. A goal pays the second it is done (the server sees it: there is nothing to press). A goal not done in 5 minutes goes, and so does one that can't be done any more (its province went to an ally, the capital fell), with nothing paid. A closed goal's slot gets a goal of another kind 2 minutes later. Goals count from when they came (a fort or a battle won before doesn't count).
-- **How much:** a nation finishes about 6 goals a match, worth about 140 gold in all: about half what its event cards' choices give, so missions nudge without changing the pace (`docs/BALANCE.md` section 22).
+- **How much:** a nation finishes about 6 goals a match, worth about 140 gold in all: about half what its event cards' choices give, so missions nudge without changing the pace (`docs/BALANCE.md` section 24).
 - **Bots** get goals by the same rules and lean towards them: the Take goal's province is the first target their armies look at (when they would attack it anyway), and their build step pays for the capital's next level or a fort first.
 - **Who sees what:** goals are private, like event cards: the server sends each player their own nation's (`Missions`, never in the delta everyone gets), by kind and province; the words live on the client.
 - **On screen:** a "Missions" plate in the top-right column under the offers: three slot tiles (the build group's bronze), each with its icon (a flag, an up arrow, a castle, crossed swords, a handshake), its province (Take) or its progress ("2/8"), and its reward as icon chips (gold 30, manpower 2k, one line-troop regiment). Tap one: the map shows its province with its sheet, and a toast says the goal in words with the time left ("🏅 Take Kent: +30 gold · 4:12 left"). Done: "🏅 Mission done! Take Kent: +30 gold"; gone: "⌛ Mission over: Take Kent". The strip steps aside while the column holds an event card, an insult to answer or an offer (so the column never reaches the power button on a 375 px phone) and while a bottom sheet is open (it reaches up under the column), and comes back after.
@@ -389,7 +404,7 @@ The rules:
 
 ### Fog of war
 
-**Fog of war** (the EU4 pack, stage 4). On by default with one Config line (`Config.Features.FogOfWar`); a private server's owner can turn it off (the "Fog" switch beside "Missions"); Studio's Workspace switch `FogOfWar` (`false` or `true`) overrides both from the next match. Off isn't a custom rule: it hides the same from everyone. The tutorial and the sandbox play without it. Rules: `Sim/Fog.luau`; numbers: `Config.Fog`; evidence: `docs/BALANCE.md` section 23.
+**Fog of war** (the EU4 pack, stage 4). On by default with one Config line (`Config.Features.FogOfWar`); a private server's owner can turn it off (the "Fog" switch on the settings sheet's More tab, under "Missions"); Studio's Workspace switch `FogOfWar` (`false` or `true`) overrides both from the next match. Off isn't a custom rule: it hides the same from everyone. The tutorial and the sandbox play without it. Rules: `Sim/Fog.luau`; numbers: `Config.Fog`; evidence: `docs/BALANCE.md` section 25.
 
 - **A nation sees:** its own provinces and the land next to them (`Config.Fog.LandSight`, 1 step), the provinces its armies stand in (`ArmySight` 0: just those), the sea zones off its coasts and the zones its fleets are in. Allies share what they see.
 - **Public:** map ownership: who holds which province, development, buildings, sieges, battles and blockades on the map, the nations' gold, manpower and races, wars, alliances, truces and offers. Neutral garrisons never move and stay in sight.
@@ -400,7 +415,7 @@ The rules:
 
 ### Navies
 
-Each map's water is split into named **sea zones** (on Skyshards, **space zones** in the void around the shards). Nations build ships in their coastal provinces, carry armies across the water, fight at sea, close straits and blockade coasts. Rules: `Sim/Navy.luau`; numbers: `Config.Navy`; the zones of each map: `docs/MAPS.md` "Sea zones"; balance: measured with bot tournaments once bots sail (stage 3).
+Each map's water is split into named **sea zones** (on Skyshards, **space zones** in the void around the shards). Nations build ships in their coastal provinces, carry armies across the water, fight at sea, close straits and blockade coasts. Rules: `Sim/Navy.luau`; numbers: `Config.Navy`; the zones of each map: `docs/MAPS.md` "Sea zones"; how bots use fleets: "Bot AI"; balance, measured with bot tournaments: `docs/BALANCE.md` section 23.
 
 - **Sea zones:** Earth has 22 (the oceans and seas, such as the North Atlantic and the Mediterranean), Eldmoor 10 round its coasts, Skyshards 10 (one wedge of space round each home shard). A zone lists its neighbouring zones and its coasts: the provinces it touches. A province touching several zones is a coast of each; the one it shares the most shore with is its **port**. Every strait lies in one zone. Lakes (the Caspian, Moonmere) have no zone. Zones are tappable: the map data's sea grid gives every water pixel its zone id (`MapGrid.decodeSea`), as the province grid does for land.
 - **Ships:** one ship type per map: a sailing **Galleon** on Earth, a **Dragonship** on Eldmoor, a **Starship** on Skyshards, with the same numbers everywhere. A ship costs 25 gold (no manpower) and 1 gold upkeep a month, fights with a hull of 1,000 (like a regiment's 1,000 men, attack and defence 1) and carries one regiment: 1,000 men of any troop type. Ships are built 1–5 at a time in an owned coastal province and launch into its port zone, joining the nation's fleet standing there or forming a new one. A blockaded province can't launch ships.
@@ -409,7 +424,7 @@ Each map's water is split into named **sea zones** (on Skyshards, **space zones*
 - **Landing:** order a fleet to a coastal province. It sails to the nearest zone off it and lands everyone aboard there as one army, which fights and besieges as usual. Landing needs land your armies could walk into (yours, an ally's, neutral, or an enemy's at war); if peace closes it before the fleet arrives, the men stay aboard.
 - **Sea battles:** fleets of nations at war in the same zone fight with the land rule: 3 rounds of 1 s, each side killing 15% of its hull × modifiers (the random ±10%, the underdog and coalition bonuses, an insult's grudge or high spirits; no terrain or forts at sea). Nobody owns the sea, so the zone's first fleet (lowest id) with an enemy there defends. Then the side with less hull retreats: each of its fleets sails, men aboard and all, to the nearest other zone off a friendly coast, taking no orders and fighting nobody on the way. A fleet with nowhere to go, or left under 500 hull, sinks with everyone aboard. Each winner gets +1 battle won.
 - **Straits:** an enemy fleet (at war with you, not retreating) in a strait's zone stops your armies crossing that strait; an army already on it stops at its edge. Skyshards' bridges are straits, so a space fleet off a shard cuts it off from the Heartstone and its drift isles.
-- **Blockades:** your coastal province is blockaded while an enemy fleet is in one of its zones and no fleet of yours or an ally's is there. It earns 50% less gold, can't launch ships, and sieges of it by the blockader's side run 1.25× as fast. You get a toast when a blockade starts.
+- **Blockades:** your coastal province is blockaded while an enemy fleet is in one of its zones and no fleet of yours or an ally's is there. It earns 25% less gold, can't launch ships, and sieges of it by the blockader's side run 1.25× as fast. You get a toast when a blockade starts.
 - **War reach:** you may declare war on a nation you share a sea zone with (both hold a coast of it), not only on one you border by land, because fleets make wars across water real.
 - **Races at sea:** race passives are about armies. At sea there is no Attack, Forest or Hills bonus, every fleet sails at the same speed (Swift is for marching), and an Upkeep race pays less for the men aboard but full price for its ships.
 - **Who sees fleets:** one helper decides it (`Navy.visible`): your own and your allies' fleets, and the others in a sea zone your nation sees while the fog of war is on (see "Fog of war"); everyone sees every fleet with it off.
@@ -505,10 +520,10 @@ tools/mapgen/                  -- Python generator for everything in assets/
 
 1. Apply queued commands.
 2. Military access that ended sends the guests' armies home; sail fleets, board armies standing on a coast onto their fleets, land fleets that arrived and merge a nation's fleets standing in one zone; then move armies (retreating armies walk home too) and merge a nation's armies standing in the same province.
-3. Resolve battles on land, then at sea; then mark the blockaded provinces.
+3. Resolve battles on land (armies out of battle recover morale every 5th tick), then at sea; then mark the blockaded provinces.
 4. Advance sieges and flip provinces.
 5. Every 10th tick: pay income and upkeep.
-6. Update Primordial-power charges and timers.
+6. Update Primordial-power charges and timers; drop map pings past their time.
 7. Bots plan (staggered: 1–2 bots per tick).
 8. Offers and insults' answer windows expire; event cards whose time ran out take their default choice, and nations whose next card is due get one; missions done pay their reward and empty mission slots whose time has come get a goal; then check win conditions and phase changes.
 9. Send one delta to every client (with the fog of war on, each player their own: what their nation sees), and each player their own event card and missions (only when they changed).
@@ -518,17 +533,19 @@ A sandbox server ("Sandbox") runs the same order at the speed its player sets (n
 ### Networking
 
 - **On join:** one full snapshot of provinces, nations, armies and fleets.
-- **Every tick:** one batched delta with only what changed (owners, development, blockades, armies, fleets, battle events).
+- **Every tick:** one batched delta with only what changed (owners, development, blockades, armies, fleets, battle events). An army's morale is a whole number in its record that changes on battle rounds and, while it recovers, once every 5 ticks (all armies on the same tick), so a resting army isn't resent every tick.
 - **Army movement:** an `UnreliableRemoteEvent` with progress between province centres; the client interpolates the token.
 - **Fleet movement:** a sailing fleet's progress towards its next zone goes on the same unreliable channel as the moving armies (in a list of its own), so its record is in a delta only when something else changes: a new zone, a battle, its hull, cargo or orders. The client glides the token between zone centres. The snapshot and the positions hold only the fleets `Navy.visible` shows.
 - **Fog of war:** with it on, each player's snapshot, deltas and positions hold only what their nation sees, and its vision (see "Fog of war"); with it off, one delta and one positions stream go to everyone. A sailing fleet costs about 36 bytes a tick (4 numbers) plus its record once per zone it enters, where it cost a whole record every tick before.
 - **Intents:** the client fires `Request…` remotes; the server answers with `CommandResult` (ok or reason).
+- **Map pings:** after each tick `PingService` sends every new ping with `FireClient` to the players of the sender's alliance only (the sender included). Pings are never in the snapshot or the delta, so enemies, neutrals and spectators can't read them from the network; a ping replaced early (or whose sender fell) is taken back with `PingGone`, the rest fade on each client at their `untilTick`.
 
 ### Security
 
 - `CommandRouter` checks ownership, neighbours, cost, cooldown and match phase on every intent. The client is never trusted.
 - Max 10 intents per second per player.
 - Bots go through `CommandRouter` too, so an AI bug can't make illegal moves.
+- A ping request is only a kind (one of `Config.Pings.Kinds`) and a province id, under the same 10-a-second limit; `Sim/Pings` then allows 1 ping per nation every 3 s, 12 a minute and 2 live at once (a third replaces the oldest), only with a living ally, never on a mountain. Pings carry no text from players.
 
 ### Map rendering
 
@@ -568,7 +585,7 @@ The map is 2D pixel art in the style of WorldBox, drawn in a full-screen GUI. Th
 | Map GUI objects (names, tokens, dots) | ≤ 2,000 |
 | Armies on the map | ≤ 60 |
 | Server work per tick | < 5 ms |
-| Network per client | < 10 KB/s (the soak measures what one player is sent over a whole match, with the fog of war on and off: `docs/BALANCE.md` section 23) |
+| Network per client | < 10 KB/s (the soak measures what one player is sent over a whole match, with the fog of war on and off: `docs/BALANCE.md` section 25) |
 
 ## Data model
 
@@ -631,6 +648,8 @@ export type Army = {
     path: { ProvinceId },      -- remaining route
     moveProgress: number,      -- ticks spent toward next province
     inBattle: boolean,
+    morale: number,            -- 0..100, whole points: a side at 0 breaks (see "Armies and combat")
+    from: ProvinceId?,         -- the province it stepped in from while marching or fighting (flanking); nil once settled
     rebel: boolean?,           -- raised by the Rebels power (drawn apart from garrisons)
     retreating: boolean?,      -- beaten and walking home: no orders, no fighting, no sieges
     boardFleet: FleetId?,      -- walking to the coast to board this fleet
@@ -654,6 +673,8 @@ export type War = { id: number, attackers: { NationId }, defenders: { NationId }
 export type Alliance = { id: number, members: { NationId } }
 export type Truce = { a: NationId, b: NationId, untilTick: number }
 export type Primordial = { userId: number, charges: number, chargeTicks: number } -- chargeTicks: its own clock
+export type PingKind = "Attack" | "Defend" | "Help" | "Look"
+export type Ping = { id: number, by: NationId, kind: PingKind, province: ProvinceId, untilTick: number } -- Sim.Pings
 
 export type MatchState = {
     mapId: string,             -- which MapDef this match is played on
@@ -673,6 +694,9 @@ export type MatchState = {
     straits: { [ProvinceId]: { [ProvinceId]: ZoneId } }, -- the zone each strait crosses
     fleets: { [FleetId]: Fleet },
     nextFleetId: FleetId,
+    pings: { Ping },           -- live map pings, oldest first: never in the snapshot or the delta (PingService)
+    pingSent: { [NationId]: { number } }, -- each nation's ping ticks in the last minute (cooldown, per-minute cap)
+    nextPingId: number,
     -- the EU4 pack's diplomacy (Sim/Diplomacy.luau), each entry with an untilTick
     grudges: { Grudge },       -- { holder, against }: the insulted fights the insulter better; against = 0: high spirits
     answers: { Answer },       -- { from, to }: the insulted may answer this insult (insult back, laugh it off)
@@ -781,13 +805,17 @@ export type Command =
 | `RequestSandbox` | client → server | `Enter` map (from any server: off to a new sandbox world), `Leave`, `Speed` 0/1/2/4, `Play` nation (0 = watch), `Disasters` on, `NewWorld` map; all but `Enter` only on a sandbox server ("Sandbox") |
 | `RequestMenu` | client → server | `Online`: the start menu's Play online (join this server's matches) |
 | `Menu` | server → client | true = show your start menu, false = close it |
+| `RequestPing` | client → server | kind (Attack, Defend, Help, Look), provinceId |
+| `Ping` | server → client (the sender's alliance only) | id, by (nation), kind, province, untilTick |
+| `PingGone` | server → client (the same players) | id: a ping that went before its time |
+| `RequestPreference` | client → server | a saved preference (`Sim/Preferences`): `music` or `sounds` and a boolean; the new `Profile` summary carries it back |
 
 ## UI and controls
 
 Phone first: the map fills the screen, the HUD stays on the edges, and every action is a tap on the map followed by a tap in a bottom sheet.
 
 - **Camera:** top-down; one finger pans, pinch zooms between 3 levels (whole map, region, province). Double-tap your capital to recentre.
-- **Top bar:** gold, manpower, Primordial-power charges, match timer, your rank, and a mute button (see "Sound and effects").
+- **Top bar:** gold, manpower, Primordial-power charges, match timer, your rank, and a speaker button with the Music and Sounds toggles (see "Sound and effects").
 - **Left drawer:** nation list with colour, province count and relation icon (ally, at war, truce, military access). A tap on another nation's row closes the drawer and shows that nation's capital with its bottom sheet, so its diplomacy buttons are one tap from the list.
 - **Bottom sheet (tap a province):** owner, development, building, plus buttons for Develop, Build and Recruit (five buttons, one per troop of your race's roster in role order, each Named `Recruit_<troop>` and showing its price) and, on a coast, Ships, or Declare war and Ally (Peace with its tributes at war) on foreign provinces. With the `diplomacy` setting on, also Insult (one tap, no message; greyed with the seconds left while the pair's wait runs), Gift (its price, or the wait) and Access (to ask for military access; "Military access" doesn't fit a 102 px tile), in the same Diplomacy row.
 - **Insults on screen:** no message, ever (see Diplomacy). The target gets a neutral toast and an answer card in the top-right column (where offers show, under the toast line) with its timer, the grudge and two buttons, Insult back and Laugh it off (with its +5% and 1:00); everyone sees an anger mark in a round badge over the target's capital for 5 s; the one who acted gets a private flavour toast.
@@ -797,6 +825,7 @@ Phone first: the map fills the screen, the HUD stays on the edges, and every act
 - **Primordial powers:** a power button opens a radial menu; pick a power, tap a target, confirm.
 - **Map modes:** Political (default), Diplomacy (allies green, enemies red), Terrain.
 - **Feedback:** toasts for war declared, province lost and battle won; a short screen shake for a meteor.
+- **Map pings:** long-press a province (or right-click it on PC, or tap the ping gem on its sheet, shown while you have an ally) to ping it for your allies: a wheel of four gems opens under your finger, Attack (crossed swords, crimson), Defend (shield, azure), Help (fire, gold) and Look (eye, slate), under an "Allies only" plate. Pings are icons, never text. For 8 s your alliance (and you) sees the ping's medallion on a stem over the province, your flag beside it and two pulse rings in your colour; each ally also gets a toast with the ping's icon ("Niger: Attack · Mesopotamia") and the `Ping` sound when it is in view or on their land. Enemies and neutrals never see it. Allied bots will follow Attack and Help pings when strong enough (stage 3, see the roadmap). Phrases are Roblox Quick Words, which the owner sets up in Creator Hub (no code).
 
 **Rules for every screen**
 
@@ -844,7 +873,7 @@ Cosmetic rarities (`Theme.rarity`, the outline and rarity line of shop cards and
 
 ### Sound and effects
 
-Cosmetic and client-only (`src/client/Effects.luau`, `src/client/Sounds.luau`): they read the delta's events and records, never change the match. WorldBox pixel style: square particles in whole map pixels, colours from `Palette.fx`, moved with TweenService.
+Cosmetic and client-only (`src/client/Effects.luau`, `src/client/Sounds.luau`, `src/client/Music.luau`): they read the delta's events and records, never change the match. WorldBox pixel style: square particles in whole map pixels, colours from `Palette.fx`, moved with TweenService.
 
 | Moment | Effect | Sound |
 | --- | --- | --- |
@@ -863,7 +892,13 @@ Cosmetic and client-only (`src/client/Effects.luau`, `src/client/Sounds.luau`): 
 
 - **Phones:** at most 240 pooled particle frames, 8 other nations' effects (14 with powers and your own fights) at once, 6 shield domes. Effects off screen are skipped, and other nations' battles and captures are skipped where the province is under 16 screen pixels wide.
 - **Sounds:** stand-ins for now, all listed in `Sounds.luau`: the few files every Roblox client ships in `content/sounds` (the default character sounds: footsteps, jumps, landings, falling, swimming, an explosion, a splash, "oof"), played at different speeds. Before launch the owner swaps in Creator Store or uploaded sounds (`rbxassetid://…`). A missing file is harmless (Roblox logs it and stays silent). You hear your own battles and captures even off screen.
-- **Mute:** a speaker button at the right end of the top bar; it mutes every sound and is remembered for the session.
+- **Music:** music follows the match (Lobby, Peace, War while at war, Cataclysm, Results) with 2.5 s crossfades; the speaker button opens Music and Sounds toggles, saved in the profile.
+  - **Moods** (`src/client/MusicMood.luau`, pure, tested in `tests/music.spec.luau`): **Lobby** on the start menu, the map vote and the draft; **Peace** in Peace, in War while you aren't fighting, and in the whole sandbox; **War** in the War phase while your nation is at war or fought a battle of yours (on land or at sea) in the last 30 s, and for a Primordial for the rest of the War phase; **Cataclysm** from 20:00; at Results a **Victory** sting if your nation (or its alliance) won, else a **Results** sting, each played once, then the Lobby theme.
+  - **Crossfades:** a mood change fades the new track in over 2.5 s while the old one fades out and stops, so one track plays once a fade is over. Peace and War never swap back within 40 s (a quick peace doesn't flip the music twice); a new screen, the Cataclysm and Results switch at once.
+  - **Ducking:** the music dips (to 0.12 for 2.6 s) under the War and Cataclysm banners so their sounds land; later banners (events, empires) call the same `Music.duck()`.
+  - **Audio:** two `AudioPlayer`s (A and B) wired into one `AudioFader` named Music (volume 0.35), wired into an `AudioDeviceOutput`, in `SoundService`. The tracks are Creator Store ids in `Music.luau`'s `TRACKS`, picked by the owner (`docs/STUDIO.md` "Music"); an empty track is silence, never an error. The sounds keep their `Sound` objects. Numbers in `Config.Music`.
+- **The speaker:** a speaker button at the right end of the top bar opens a small plate under it with two 44 px toggles, **Music** (a note) and **Sounds** (the speaker): green with the icon when on, slate with a crossed-out icon when off. Two taps either way; the plate closes when the speaker is tapped again or 5 s after the last tap. Music off stops the music only; Sounds off silences every effect and button sound. The speaker shows muted (attribute `Muted`) when both are off.
+- **Saved:** each toggle is a `RequestPreference` intent (`music` or `sounds`, a boolean) through `CommandRouter` (shape and rate limit), then `Sim/Preferences.luau`, which keeps the allowed keys and values and writes `profile.settings.music` and `settings.sounds` (stored only when off). The `Profile` remote carries both, so a player who turned music off never hears it start when they join. Analytics: `music_setting` (`docs/LAUNCH.md`).
 
 ## Bot AI
 
@@ -871,26 +906,33 @@ Each bot checks a short priority list every few seconds and does the first actio
 
 **Priority list** (bots are staggered so 1–2 plan per tick)
 
-1. **Defend:** an enemy army borders one of my provinces → send the nearest army if my strength is at least 0.8× theirs, otherwise recruit there: my race's ranged troop (the best defenders) if I can pay for it and it makes up at most 30% of my men, else my line troop.
-2. **Recruit:** total army is below provinces × 800 men and manpower is available. My race's line troop is the base; at war, if I can pay for it and still keep 2 months of upkeep: my special while it makes up at most 10% of my men, else my elite (up to 20%) and my fast troop (up to 10%), the one furthest below its share first (`Config.Bots`: RangedShare, SpecialShare, EliteShare, FastShare). Bots pick troops by role, so every race's bots work the same way.
+1. **Defend:** an enemy army borders one of my provinces → send the nearest rested army if my strength is at least 0.8× theirs, otherwise recruit there: of my ranged troop (the best defenders, while it makes up at most 30% of my men) and my line troop, the one that defends best against that enemy's mix (defence × counter) first.
+2. **Recruit:** total army is below provinces × 800 men and manpower is available. My race's line troop is the base. At war, if I can pay for it and still keep 2 months of upkeep: my special while it makes up at most 10% of my men, else my elite (up to 20%) and my fast troop (up to 10%), the one furthest below its share first, else the troop that beats the enemy armies in and next to my land (the role with the best counter score against their mix, if it scores at least 0.15: `CounterMinScore`) while it makes up at most 35% of my men (`CounterShare`); never a troop those enemy armies beat (`Config.Bots`: RangedShare, SpecialShare, EliteShare, FastShare, CounterShare, CounterMinScore). Against the usual line-heavy armies the counter is my ranged troop, and my fast troop waits until they field fewer line troops. Bots pick troops by role, so every race's bots work the same way.
 3. **Expand:** a neutral neighbour whose garrison I can beat → attack it.
-4. **Attack:** an enemy I'm at war with, or my weakest neighbour, if my strength is above the attack ratio and there's no truce.
-5. **Build:** gold left over after 2 months of upkeep → barracks first, then farms, forts on borders (Hills races pay half), then develop; with everything built, spare gold buys regiments (the Recruit step's troop).
-6. **Diplomacy:** ally with a nation that shares my enemy; accept peace after losing 30% of my provinces in a war; join coalitions against the leader.
-7. **Primordial power:** with 2 charges, Meteor the biggest army of a nation I'm at war with that isn't immune right now. This rides along with whatever else the plan does, so charges don't pile up.
-8. **Insults and access** (with the `diplomacy` setting on; they ride along too): accept a nation's military access request unless I'm at war with it or hold a grudge against it; when insulted, insult back half the time (decided once per insult), otherwise keep the grudge (bots never laugh one off); and now and then (0.2% of plans, about one insult per bot in a match) insult a rival: a nation I'm at war with, else a neighbour that isn't my ally.
-9. **Event cards** (with the `events` setting on; they ride along too): answer my open card once, with the affordable choice worth more gold (`Sim/EventCards.worth`).
-10. **Missions** (with the `missions` setting on): my Take goal's province is the first target the Expand and Attack steps look at, and the Build step pays for my capital's next level (Grow) or a fort (Fort) before anything else (`Sim/Missions.botOrder`).
+4. **Attack:** an enemy I'm at war with, or my weakest neighbour, if my strength is above the attack ratio and there's no truce. With no neighbour by land to take on, a nation across the sea (we both hold a coast of one sea zone, see "Navies") whose coast there a landing from one of my free stacks would beat the same way, if I can have the ships for it (step 5). An enemy across a sea we share counts as in reach, so a bot at war with one doesn't look for another war. Two free stacks that can take a province together but not alone march to two different neighbours of it, then strike on the same tick from two sides (a flank).
+5. **Sea:** a coast my armies can't walk to (no route by land, because it runs through a nation at peace with me, or a closed one: an enemy fleet in a strait, an enemy army on the way), at most 2 zones from my port: neutral land a landing beats, or enemy land where it is above the attack ratio, reached without meeting a stronger fleet. Ships are built at my coast nearest my free stack, and my spare fleets sail there; once they carry the stack (at most the difficulty's ships for one landing, below), it embarks. One landing at a time. Ships are bought only with gold left over after 2 months of upkeep (theirs included), and their upkeep stays under the difficulty's share of my gold income.
+6. **Build:** gold left over after 2 months of upkeep → barracks first, then farms, forts on borders (Hills races pay half), then develop; with everything built, spare gold buys regiments (the Recruit step's troop).
+7. **Diplomacy:** ally with a nation that shares my enemy; accept peace after losing 30% of my provinces in a war; join coalitions against the leader.
+8. **Primordial power:** with 2 charges, Meteor the biggest army of a nation I'm at war with that isn't immune right now. This rides along with whatever else the plan does, so charges don't pile up.
+9. **Insults and access** (with the `diplomacy` setting on; they ride along too): accept a nation's military access request unless I'm at war with it or hold a grudge against it; when insulted, insult back half the time (decided once per insult), otherwise keep the grudge (bots never laugh one off); and now and then (0.2% of plans, about one insult per bot in a match) insult a rival: a nation I'm at war with, else a neighbour that isn't my ally.
+10. **Event cards** (with the `events` setting on; they ride along too): answer my open card once, with the affordable choice worth more gold (`Sim/EventCards.worth`).
+11. **Missions** (with the `missions` setting on): my Take goal's province is the first target the Expand and Attack steps look at, and the Build step pays for my capital's next level (Grow) or a fort (Fort) before anything else (`Sim/Missions.botOrder`).
 
 **Fog of war:** with it on, a bot plans with the armies its nation (and its allies) see: the others don't exist for its threats, targets, war odds and Meteor.
 
 **Grudges:** an insulted bot leans towards war with its insulter. In the Attack step a neighbour that insulted me is the first war target, and my stack needs only 0.85× my usual attack ratio against it, never under 1× (an even fight). It doesn't change how strong my whole side must be.
 
-| Difficulty | Plans every | Attack ratio | Behaviour |
-| --- | --- | --- | --- |
-| Easy | 6 s | 1.6× | Won't declare war on a player, march into a player's land or use a power on one in the first 8 min (it still defends) |
-| Normal | 3 s | 1.3× | Default |
-| Hard | 2 s | 1.1× | Targets the leading player |
+**Tactics** (every difficulty; `Config.Bots`): a bot's strength checks include the counters and its flank, and its attack checks both sides' morale too (`Battle.outcome` plays the rounds out); a guard holds by strength alone (one that recruited until it would not break spent the gold bots keep for elites: `docs/BALANCE.md` section 22). It doesn't attack into a counter: when the enemy's troops beat its own (by more than `CounterEdge`) it wants 0.3 more on the attack ratio (`CounteredExtraRatio`). An army under 70 morale (`MinAttackMorale`) doesn't expand, attack or march to help: a broken army rests until it has recovered. A worn-out enemy is fair game: a bot attacks when it would still win against `attack ratio` × the enemy's men. The same rules hold at sea: a tired army doesn't board a fleet for a landing, and a landing (steps 4 and 5, and where a fleet puts its men ashore) is judged like an attack by land, counters and morale included; the men land as a fresh army with full morale, from one direction.
+
+One more kind of order rides along with whatever the plan does:
+
+- **Fleet orders** (they spend nothing; at most one per fleet): a fleet whose army has all boarded lands it on the coast it wins (the same choice as step 5), else on my nearest coast; my nearest empty fleet that beats the blockaders by the attack ratio sails against a blockade of my coast; an empty fleet sails off an enemy coast my army besieges, so the siege runs faster; the other empty fleets gather at the port of the landing being prepared, else at my home port (the port nearest my capital), unless they stand off an enemy coast, which they blockade. No fleet sails a route through a fleet it wouldn't beat by the attack ratio, and a bot reckons only with the fleets `Navy.visible` shows it.
+
+| Difficulty | Plans every | Attack ratio | Ships: upkeep within this share of gold income, ships for one landing | Behaviour |
+| --- | --- | --- | --- | --- |
+| Easy | 6 s | 1.6× | 10%, 3 | Won't declare war on a player, march or land in a player's land or use a power on one in the first 8 min (it still defends, at sea too) |
+| Normal | 3 s | 1.3× | 15%, 5 | Default |
+| Hard | 2 s | 1.1× | 20%, 5 | Targets the leading player |
 
 No cheating: harder bots think faster and take more risks, but they never get free gold or manpower.
 
@@ -976,8 +1018,11 @@ Five phases, each ending in a playtest gate the owner runs in Studio.
 - [x] "Slate & Brass" GUI step 3: the top bar as plates in Roblox's own top-bar row (`GuiService.TopbarInset`, with a fallback row under it), a scrim, counters with riding icons, the clock in a phase medallion, the `fitBar` order on small phones, one `Hud.contentTop()` for everything under the bar; on tablets the whole UI scales up with the screen's short side (`Theme.uiScale`, phones stay at 1)
 - [x] "Slate & Brass" GUI step 4: the province sheet's actions as slot tiles five to a row (`Widgets.slotTile`: build bronze, recruit green, diplomacy in full colour; gold costs, red when short, greyed when not possible), a coast's Ships tile in the build row (six to a row when they fit), the development as the map's pip bar in a well, status chips on the info row when they fit; army and fleet composition as icon + men chips and a route line; the power button as a royal medallion with the picker docked beside it; your row raised in the nations drawer; offers on plates with a counter, under the toasts' line
 - [x] "Slate & Brass" GUI step 5: the shop's cards in their rarity's frame with a rarity tag on the top edge, a lit display well, the name and a detail line, Robux (emerald) and Glory (gold) prices side by side when they fit; offer cards in brass with title plates; a Glory counter; the window keeps its phone size on tablets (the cards never stretch); the starter-pack pop-up over a dimmed screen
+- [x] "Slate & Brass" GUI step 6: the moments. Results as a brass window hanging from its gold ribbon ("YOU WIN!" with a trophy, or the winners with a flag) over turning pale gold rays; your standings row raised with a gold marker; XP and Glory reward cells that count up; the breakdown in a well; the level bar filling and a level-up stamp; room for the match replay page. The War and Cataclysm banners as ribbons with a hero drop and a shine sweep; MATCH OVER pops on the Results ribbon and fades to show it. Toasts carry a medallion in the event's colour and fit their text
+- [x] "Slate & Brass" GUI step 7: one kit on every other screen. The map vote's cards as raised plates with wells and a gold outline on your vote; the draft's nations as plate tiles with a gold "Pick"; season pass cells with rarity rims, a gold glow on what you can claim and wells for empty tiers; quests with emerald bars and reward chips and the calendar as wells; nine trophies a page with room inside their plates; the private settings sheet, the tutorial card, the sandbox panel, emotes, the event card, the insult answer card and the speaker popover in the kit. The full-screen screens cover Roblox's top-bar row (the same room in Studio as in the harness) with their title plates clear of Roblox's buttons
 - [x] A cast of five peoples for every map, data-driven (`Config.Races`, `Config.Casts`): human civilisations on Earth, the fantasy peoples and the Lizardfolk on Eldmoor, sci-fi peoples on Skyshards with troopers, gunners and hover bikes; seven passive kinds; an elite, a soldier, a capital and icons for each (evidence: `docs/BALANCE.md` section 19)
 - [x] Five troops per race (`Config.Races[race].roster`): a line, a ranged, a fast, an elite and a special troop with one trick (siege, terrain, pathfinder or anti-garrison), each with its own name, icon and soldier token; Earth's five human cultures share four troops and add their own elite; one race per player per match (the server refuses any other troop); bots, the tutorial and the HUD go by role; the province sheet's five recruit buttons (evidence: `docs/BALANCE.md` section 19, harness scenarios `races` and `kingdoms`)
+- [x] Smarter PvP: troop counters, morale, flanking (owner request): a line/ranged/fast counter cycle, morale that breaks a side before round 3, a flank bonus per extra direction, bots that counter-recruit, rest broken armies and strike from two sides; the recruit tiles' counter badges, morale on the army sheet and the map, battle toasts that say what decided it (evidence: `docs/BALANCE.md` section 22, harness scenario `pvp`)
 
 **Gate 4:** 10 testers who have never played finish the tutorial without help.
 
@@ -987,8 +1032,8 @@ The owner's "diplomacy like insulting" and more EU4 flavour, in stages. A later 
 
 - [x] Stage 1: insults as a diplomatic action with no message (Roblox's preset-text rule) and their answers (insult back, laugh it off), grudges, private flavour lines, gifts and military access, a match setting to turn them off, bots that insult, insult back and lean towards war with an insulter (harness scenario `diplomacy`; evidence: `docs/BALANCE.md` section 20)
 - [x] Stage 2: events with choices: an event card every few minutes for each nation (33 events: a shared pool and one per map, coast, fleet and war events only when they apply), two choices with clear effects (gold, manpower, development, regiments, a ship, an income boost), a 20 s default, shown only to its own player, bots answering through the same command, a match setting, `event_card` analytics (harness scenario `events`; evidence: `docs/BALANCE.md` section 21)
-- [x] Stage 3: missions: three short goals at a time for every nation (take a named neighbouring province, develop the capital, build a fort, win battles, join an alliance), each with a clear reward, replaced when done or gone, bots getting and leaning towards them by the same rules, private to each player (the event-card pattern: its own remote and the offers column), a match setting, `mission` analytics (harness scenario `missions`; evidence: `docs/BALANCE.md` section 22)
-- [x] Stage 4: fog of war: one Config line, a private-server setting and Studio's `FogOfWar` switch; a nation sees its land and the land next to it, where its armies and fleets are and what its allies see; per-player deltas and positions with it on, one stream with it off; bots obey it; a light haze over unseen land in the map's own image (harness scenario `fog`, the soak's network check; evidence: `docs/BALANCE.md` section 23)
+- [x] Stage 3: missions: three short goals at a time for every nation (take a named neighbouring province, develop the capital, build a fort, win battles, join an alliance), each with a clear reward, replaced when done or gone, bots getting and leaning towards them by the same rules, private to each player (the event-card pattern: its own remote and the offers column), a match setting, `mission` analytics (harness scenario `missions`; evidence: `docs/BALANCE.md` section 24)
+- [x] Stage 4: fog of war: one Config line, a private-server setting and Studio's `FogOfWar` switch; a nation sees its land and the land next to it, where its armies and fleets are and what its allies see; per-player deltas and positions with it on, one stream with it off; bots obey it; a light haze over unseen land in the map's own image (harness scenario `fog`, the soak's network check; evidence: `docs/BALANCE.md` section 25)
 
 ### Phase 5: Soft launch
 
@@ -1005,7 +1050,24 @@ The owner's "diplomacy like insulting" and more EU4 flavour, in stages. A later 
 - [ ] Soft-launch gates met (`docs/LAUNCH.md`) before Season 1
 - [x] Navies, stage 1: sea and space zones in the map data (generator, validator, `MapData`), the rules for ships and fleets, embarking and landing, sea battles, straits blocked by fleets, blockades and war across the sea (`Sim/Navy.luau`, tests in `tests/navy.spec.luau`)
 - [x] Navies, stage 2: the orders through `CommandRouter`, fleets in the snapshot, the ship art for each map, fleet tokens and sea zones on the map, the fleet sheet, toasts, a harness scenario (`tools/harness/scenarios/navy.luau`), a `docs/STUDIO.md` recipe
-- [ ] Navies, stage 3: bots at sea, bot tournaments and balance (Earth's Americas)
+- [x] Navies, stage 3: bots at sea (`Sim/Bot.luau`: the Sea step and fleet orders, tests in `tests/botsea.spec.luau`), navy numbers in the bot tournament, balance (`docs/BALANCE.md` section 23, Earth's Americas), fleets in the soak, a landing in the bots scenario
+
+### Phase 6: Next features (docs/NEXT_FEATURES.md)
+
+- [x] Map pings for allies (Attack, Defend, Help, Look), stages 1–2: `Sim/Pings` with its tests, the `Ping` command through `CommandRouter`, `PingService` sending to allies only, the long-press wheel and the sheet's ping gem, markers on the map's pooled "Markers" layer (`MapMarkers`), the toast and the sound stand-in, `ping_sent` analytics, harness scenario `pings`; Roblox Quick Words are the owner's Creator Hub setup
+- [ ] Map pings, stage 3: allied bots follow Attack and Help pings and ping their own targets; `ping_followed`
+- [ ] Results replay of the match's borders and one award per player
+- [x] Music: Lobby, Peace, War, Cataclysm and Results tracks with crossfades; Music and Sounds toggles (stages 1 and 2: `Config.Music`, `MusicMood` with `tests/music.spec.luau`, `Music.luau`, the speaker popover, `RequestPreference` with `Sim/Preferences` and `tests/preferences.spec.luau`, `music_setting`; harness scenario `music`; the owner picks the tracks, `docs/STUDIO.md` "Music")
+- [ ] Map regions and empires
+- [ ] Play with friends: Roblox Party, invites, parties seated together, the tutorial deferred
+- [ ] Weekly twists
+- [ ] Battle animations
+- [ ] Advisor
+- [ ] Blitz mode
+- [ ] Daily challenge
+- [ ] Race mastery and the collection book
+- [ ] Accessibility: colour-safe map, text size, translations
+- [ ] Ranked mode (after launch)
 
 ## Open questions
 
