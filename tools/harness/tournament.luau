@@ -32,6 +32,7 @@ local Diplomacy = require("../../src/shared/Sim/Diplomacy")
 local EventCards = require("../../src/shared/Sim/EventCards")
 local Maps = require("../../src/shared/Maps")
 local Match = require("../../src/shared/Sim/Match")
+local Missions = require("../../src/shared/Sim/Missions")
 local Races = require("../../src/shared/Sim/Races")
 local Rng = require("../../src/shared/Sim/Rng")
 local Tick = require("../../src/shared/Sim/Tick")
@@ -104,6 +105,9 @@ type MatchStats = {
 	granted: { [string]: number }, -- what the closed cards gave, by effect (gold, manpower, development, regiments...)
 	missionsDone: { [string]: number }, -- the EU4 pack's missions (stage 3) bots finished, by kind...
 	missionsExpired: number, -- ...and those that ran out of time or couldn't be done any more
+	cardsWorth: number, -- what the closed cards' choices and the finished missions' rewards were worth in gold when
+	missionsWorth: number, -- they paid (EventCards.worth, Config.Bots.EventWorth: the bots' own sums)...
+	cardsFixedWorth: number, -- ...and the cards without their income boosts (worth the nation's income at the time)
 	leaderChanges: number, -- minutes (from 3:00) that ended with a different nation holding the most provinces
 	armyStats: { [number]: ArmyStats }, -- at the end of minutes 15 and 25 (or the end of the match)
 	group: { [number]: string }, -- mixed mode: nation -> "A" or "B"
@@ -232,10 +236,13 @@ local function runMatch(mapId: string, seed: number): MatchStats
 		granted = {},
 		missionsDone = {},
 		missionsExpired = 0,
+		cardsWorth = 0,
+		missionsWorth = 0,
+		cardsFixedWorth = 0,
 		leaderChanges = 0,
 		armyStats = {},
 	}
-	local lastMission: { [number]: number } = {} -- nation -> the last closed mission counted
+	local missionsCounted: { [number]: number } = {} -- nation -> how many of its closed missions are counted
 	local lastCard: { [number]: number } = {} -- nation -> the last event card counted
 	while state.result == nil do
 		for _, order in queue do -- 1. apply queued commands
@@ -301,21 +308,29 @@ local function runMatch(mapId: string, seed: number): MatchStats
 					stats.cardsTimedOut += 1
 				end
 				local def = EventCards.def(last.event)
-				for effect, amount in (if def then def.choices[last.choice] else {}) :: { [string]: number } do
+				local choice = if def then def.choices[last.choice] else nil
+				for effect, amount in (choice or {}) :: { [string]: number } do
 					stats.granted[effect] = (stats.granted[effect] or 0) + amount
+				end
+				if choice then
+					stats.cardsWorth += EventCards.worth(state, id, choice)
+					local fixed = table.clone(choice)
+					fixed.boost = nil
+					stats.cardsFixedWorth += EventCards.worth(state, id, fixed)
 				end
 			end
 		end
 		for id, b in state.missions or {} do
-			local closed = b.last
-			if closed and lastMission[id] ~= closed.id then
-				lastMission[id] = closed.id
+			for i = (missionsCounted[id] or 0) + 1, #b.closed do
+				local closed = b.closed[i]
 				if closed.done then
 					stats.missionsDone[closed.kind] = (stats.missionsDone[closed.kind] or 0) + 1
+					stats.missionsWorth += EventCards.worth(state, id, Missions.reward(closed.kind) :: any)
 				else
 					stats.missionsExpired += 1
 				end
 			end
+			missionsCounted[id] = #b.closed
 		end
 		if state.tick % 60 == 0 or state.result then
 			local best, leader = 0, 0
@@ -362,6 +377,9 @@ local function runMatch(mapId: string, seed: number): MatchStats
 		granted = stats.granted,
 		missionsDone = stats.missionsDone,
 		missionsExpired = stats.missionsExpired,
+		cardsWorth = stats.cardsWorth,
+		missionsWorth = stats.missionsWorth,
+		cardsFixedWorth = stats.cardsFixedWorth,
 		leaderChanges = stats.leaderChanges,
 		armyStats = stats.armyStats,
 		group = group,
@@ -424,7 +442,7 @@ for _, mapId in mapIds do
 	local insults, insultsBack, grudgeWars, cards, cardsTimedOut = 0, 0, 0, 0, 0
 	local granted: { [string]: number } = {}
 	local missionsDone: { [string]: number } = {}
-	local missionsExpired = 0
+	local missionsExpired, cardsWorth, missionsWorth, cardsFixedWorth = 0, 0, 0, 0
 	local atMinute: { [number]: { [string]: { number } } } = {}
 	for _, m in { 15, 25 } do
 		atMinute[m] = { armies = {}, men = {}, maxMen = {}, stacked = {}, gold = {}, manpower = {} }
@@ -440,6 +458,37 @@ for _, mapId in mapIds do
 	local recruits: { [string]: number } = {}
 	for seed = firstSeed, firstSeed + seeds - 1 do
 		local s = runMatch(mapId, seed)
+		if process.env.RAW == "1" then
+			local a25 = s.armyStats[25] or s.armyStats[15] or { men = 0 }
+			local land = {}
+			for id, race in s.races do
+				table.insert(land, string.format("%d:%s:%d", id, race, s.finalProvinces[id] or 0))
+			end
+			print(
+				string.format(
+					"raw %s %d %s %d men25=%d wars=%d conquests=%d cards=%.1f fixed=%.1f missions=%.1f done=%d winners=%s land=%s",
+					mapId,
+					seed,
+					s.result.kind,
+					s.result.endedAt,
+					a25.men,
+					s.wars,
+					s.conquests,
+					s.cardsWorth,
+					s.cardsFixedWorth,
+					s.missionsWorth,
+					(function()
+						local n = 0
+						for _, k in s.missionsDone do
+							n += k
+						end
+						return n
+					end)(),
+					table.concat(s.result.winners :: { any }, "+"),
+					table.concat(land, ",")
+				)
+			)
+		end
 		for _, w in s.result.winners do
 			wins[w] = (wins[w] or 0) + 1
 			raceWins[s.races[w]] = (raceWins[s.races[w]] or 0) + 1
@@ -513,6 +562,9 @@ for _, mapId in mapIds do
 			missionsDone[kind] = (missionsDone[kind] or 0) + n
 		end
 		missionsExpired += s.missionsExpired
+		cardsWorth += s.cardsWorth
+		cardsFixedWorth += s.cardsFixedWorth
+		missionsWorth += s.missionsWorth
 		leaderChanges += s.leaderChanges
 		for k, v in s.rejectReasons do
 			reasons[k] = (reasons[k] or 0) + v
@@ -634,6 +686,15 @@ for _, mapId in mapIds do
 			done / seeds / 10,
 			table.concat(byKind, ", "),
 			missionsExpired / seeds / 10
+		)
+	)
+	print(
+		string.format(
+			"worth per nation per match in gold (Config.Bots.EventWorth): event cards %.0f (%.0f without the income "
+				.. "boosts), missions %.0f",
+			cardsWorth / seeds / 10,
+			cardsFixedWorth / seeds / 10,
+			missionsWorth / seeds / 10
 		)
 	)
 	print(

@@ -1368,14 +1368,14 @@ local function build(map: Types.MapDef)
 	onZoom(MapView.zoom())
 end
 
--- A layer of the current map's canvas by name (nil before the first map), the map's size in map pixels, and a
--- province's rough width in map pixels: for Effects, which draws on the "Effects" layer.
 -- Is this province under the fog of war's haze on this client's map? (For the harness and Studio checks.)
 function MapRenderer.fogged(provinceId: number): boolean
 	local a = art
 	return a ~= nil and a.fog[provinceId] == true
 end
 
+-- A layer of the current map's canvas by name (nil before the first map), the map's size in map pixels, and a
+-- province's rough width in map pixels: for Effects, which draws on the "Effects" layer.
 function MapRenderer.layer(name: string): Frame?
 	return layers[name]
 end

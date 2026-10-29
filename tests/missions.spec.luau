@@ -50,7 +50,7 @@ local function give(
 		untilTick = state.tick + M.Ticks,
 	}
 	state.nextMissionId += 1
-	state.missions[id] = { missions = { m }, refills = {}, last = nil, done = 0 }
+	state.missions[id] = { missions = { m }, refills = {}, closed = {}, last = nil, done = 0 }
 	return m
 end
 
@@ -234,6 +234,19 @@ T.test("a goal out of time, or one that can't be done any more, goes with nothin
 	state.tick = m.untilTick
 	Missions.step(state, rng)
 	T.expect(#Missions.list(state, A) == 0 and not state.missions[A].last.done, "out of time")
+
+	-- two goals closing on one tick are both on the record (the tournament and the `mission` analytics read it)
+	local first = give(state, A, "Win", 0, 0, 2)
+	local second = table.clone(first)
+	second.id, second.kind = state.nextMissionId, "Fort"
+	state.nextMissionId += 1
+	table.insert(state.missions[A].missions, second)
+	state.tick = first.untilTick
+	Missions.step(state, rng)
+	local closed = state.missions[A].closed
+	T.equal(#closed, 2, "both closed goals recorded")
+	T.expect(closed[1].id == first.id and closed[2].id == second.id, "oldest first")
+	T.expect(state.missions[A].last == closed[2], "last is the latest")
 end)
 
 T.test("Ally: done when the nation joins an alliance; never dealt to a nation in one", function()
@@ -396,12 +409,12 @@ T.test("the words: every goal short enough with the longest province name, and c
 	T.equal(MissionText.goal("Win", nil, 2), "Win 2 battles")
 	T.equal(MissionText.goal("Fort", nil, 1), "Build a fort")
 	T.equal(MissionText.goal("Take", "Kent", 1), "Take Kent")
-	-- a reward is gold, manpower or regiments only, about 30-60 gold's worth
+	-- a reward is gold, manpower or regiments only, about 15-30 gold's worth (modest: docs/BALANCE.md section 22)
 	local W = Config.Bots.EventWorth
 	for _, kind in Missions.KINDS do
 		local r = Missions.reward(kind)
 		local worth = (r.gold or 0) + (r.manpower or 0) * W.Manpower + (r.regiments or 0) * W.Regiment
-		T.expect(worth >= 30 and worth <= 60, kind .. " is worth " .. worth .. " gold")
+		T.expect(worth >= 15 and worth <= 30, kind .. " is worth " .. worth .. " gold")
 	end
 end)
 

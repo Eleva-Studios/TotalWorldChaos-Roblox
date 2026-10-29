@@ -563,7 +563,7 @@ local function lerp(a, b, t: number)
 end
 
 roblox.implementMethod("TweenService", "Create", function(_service, inst, info, goals)
-	local tween = { Instance = inst, Completed = Signal.new() }
+	local tween = { Instance = inst, Completed = Signal.new(), path = inst:GetFullName() }
 	function tween.Play(self)
 		self.from = {}
 		for prop in goals do
@@ -614,8 +614,9 @@ local function stepTweens()
 			local ok, err = pcall(t.step, t)
 			if not ok then
 				activeTweens[t] = nil
-				table.insert(errors, "[tween] ERROR " .. tostring(err))
-				log("[tween] ERROR " .. tostring(err))
+				local what = tostring(err) .. " (a tween on " .. tostring(t.path) .. ")"
+				table.insert(errors, "[tween] ERROR " .. what)
+				log("[tween] ERROR " .. what)
 			end
 		end
 	end

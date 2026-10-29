@@ -265,7 +265,10 @@ local function run()
 	H.shot(bob, "victory")
 end
 
+-- Alice and Bob look at each other's army tokens across the map: every army in sight (what the fog of war hides has
+-- its own scenario: fog)
 return {
 	lobby = true, -- it runs the Lobby; the rest boot with SkipLobby
 	run = run,
+	attributes = { FogOfWar = false },
 }

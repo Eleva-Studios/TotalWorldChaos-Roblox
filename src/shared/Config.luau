@@ -916,19 +916,21 @@ Config.EventCards = {
 -- Every living nation has a few short goals at a time, each of another kind. Rules: Sim/Missions.luau. A goal pays its
 -- reward the tick it is done: gold, manpower, or regiments of the race's line troop raised at the capital. A closed
 -- goal (done, out of time, or impossible) makes room for one of another kind RefillTicks later. Rewards are about
--- 30-60 gold's worth (100 manpower = 1 gold, a regiment 10 gold and 1,000 manpower); docs/BALANCE.md section 22.
+-- 15-30 gold's worth (Config.Bots.EventWorth: 100 manpower = 1 gold, a regiment 15 in peace, 30 at war). Modest on
+-- purpose: about 6 goals done per nation per match, worth about 140 gold, half what the event cards' choices give
+-- (docs/BALANCE.md section 22).
 Config.Missions = {
 	Slots = 3, -- goals a nation has at a time
 	FirstTicks = 20, -- nation 1's first goals come this far into the match...
 	StaggerTicks = 1, -- ...each next nation's this much later
-	RefillTicks = 20, -- a closed goal's slot gets a new goal this long after
+	RefillTicks = 2 * 60, -- a closed goal's slot gets a new goal this long after
 	Ticks = 5 * 60, -- a goal not done in this long goes, with nothing paid
 	Kinds = {
-		Take = { reward = { gold = 60 } }, -- take a named province next to your land (neutral in Peace)
-		Grow = { reward = { gold = 40 }, levels = 1 }, -- develop your capital this many levels
-		Fort = { reward = { manpower = 4000 }, forts = 1 }, -- build this many forts
-		Win = { reward = { regiments = 2 }, battles = 5 }, -- win this many battles (a neutral garrison counts)
-		Ally = { reward = { gold = 50 } }, -- join an alliance
+		Take = { reward = { gold = 30 } }, -- take a named province next to your land (neutral in Peace)
+		Grow = { reward = { gold = 20 }, levels = 1 }, -- develop your capital this many levels
+		Fort = { reward = { manpower = 2000 }, forts = 1 }, -- build this many forts
+		Win = { reward = { regiments = 1 }, battles = 8 }, -- win this many battles (a neutral garrison counts)
+		Ally = { reward = { gold = 25 } }, -- join an alliance
 	},
 }
 

@@ -195,7 +195,7 @@ local function boardOf(state: MatchState, nationId: number): MissionBoard
 		for _ = 1, M.Slots do
 			table.insert(refills, first)
 		end
-		b = { missions = {}, refills = refills, last = nil, done = 0 }
+		b = { missions = {}, refills = refills, closed = {}, last = nil, done = 0 }
 		boards[nationId] = b
 	end
 	return b
@@ -300,7 +300,9 @@ function Missions.step(state: MatchState, rng: Rng.Rng)
 					pay(state, id, Missions.reward(m.kind))
 					b.done += 1
 				end
-				b.last = { id = m.id, kind = m.kind, target = m.target, done = finished }
+				local outcome = { id = m.id, kind = m.kind, target = m.target, done = finished }
+				table.insert(b.closed, outcome)
+				b.last = outcome
 				table.insert(b.refills, state.tick + M.RefillTicks)
 			else
 				table.insert(kept, m)

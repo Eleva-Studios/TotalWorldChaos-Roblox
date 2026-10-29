@@ -173,9 +173,6 @@ for minute = 1, math.ceil(MINUTES) do
 	local t0 = os.clock()
 	Emulator.run(60)
 	local state = MatchService.state()
-	if state == first and first.result == nil then
-		sampleTenViews(state)
-	end
 	local gui = guiObjects(alice)
 	local armies, wars, mine = 0, 0, 0
 	for _ in state.armies do

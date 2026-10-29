@@ -202,7 +202,10 @@ local function run()
 	H.expect(impacts >= 3, "every Meteor look lands with the same impact sound")
 end
 
+-- nations cast powers at each other's armies across the map, and Alice watches at Bob's capital: every army in sight
+-- (what the fog of war hides has its own scenario: fog)
 return {
 	lobby = true, -- it runs the Lobby; the rest boot with SkipLobby
 	run = run,
+	attributes = { FogOfWar = false },
 }

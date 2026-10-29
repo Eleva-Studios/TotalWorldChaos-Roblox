@@ -185,9 +185,15 @@ export type EventCardView = {
 export type Mission = { id: number, kind: string, target: ProvinceId, base: number, need: number, untilTick: number }
 -- What a goal came to: done (its reward paid), or not (out of time, or it couldn't be done any more).
 export type MissionOutcome = { id: number, kind: string, target: ProvinceId, done: boolean }
--- One nation's goals: the open ones, the ticks its empty slots get a new one, the last one closed and how many it has
--- done this match.
-export type MissionBoard = { missions: { Mission }, refills: { number }, last: MissionOutcome?, done: number }
+-- One nation's goals: the open ones, the ticks its empty slots get a new one, every one closed this match (oldest
+-- first; two can close on one tick), the last one closed and how many it has done this match.
+export type MissionBoard = {
+	missions: { Mission },
+	refills: { number },
+	closed: { MissionOutcome },
+	last: MissionOutcome?,
+	done: number,
+}
 -- One goal as a player's client sees it: its progress as `have` out of `need` (counted from when it came).
 export type MissionInfo = { id: number, kind: string, target: number, have: number, need: number, untilTick: number }
 -- What a player's client is told about its own nation's goals, on its own remote, never in the delta everyone gets:

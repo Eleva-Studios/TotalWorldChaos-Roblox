@@ -3,8 +3,8 @@
 -- tiles on a plate in the offers column (icon, province or progress, reward chips); Bob sees only his own. A tap on a
 -- goal shows its province (with its sheet; the strip steps aside meanwhile) and says it in words. She develops her
 -- capital for a Grow goal: it pays on the spot, a toast says so, and after a short wait a goal of another kind takes
--- the slot. The strip steps aside while an event card is open. Bots get goals by the same rules and finish some. `mission` reaches analytics. Studio's DevMissions fills
--- empty slots at once; with the setting off the strip is gone.
+-- the slot. The strip steps aside while an event card is open. Bots get goals by the same rules and finish some.
+-- `mission` reaches analytics. Studio's DevMissions fills empty slots at once; with the setting off the strip is gone.
 
 local Emulator = require("../Emulator")
 local H = require("../H")
@@ -52,17 +52,19 @@ local function run()
 			{ id = state.nextMissionId, kind = "Grow", target = capital, base = level, need = level + 1, untilTick = state.tick + M.Ticks },
 		},
 		refills = { state.tick + 10000, state.tick + 10000 },
+		closed = state.missions[A].closed,
 		last = nil,
 		done = state.missions[A].done,
 	}
 	state.nextMissionId += 1
 	Emulator.run(1.5)
 	H.expect(H.hasButton(alice, "Mission_Grow") and H.within(alice, "Mission_Grow", "0/1"), "the Grow tile, 0 of 1")
-	H.expect(H.within(alice, "Mission_Grow", "40"), "it pays 40 gold")
+	local pays = M.Kinds.Grow.reward.gold
+	H.expect(H.within(alice, "Mission_Grow", tostring(pays)), "it pays " .. pays .. " gold")
 	Emulator.press(alice, "Mission_Grow")
 	Emulator.run(1)
 	local name = state.provinces[capital].name
-	H.expect(H.waitText(alice, "Develop " .. name .. ": +40 gold"), "a tap says the goal in words")
+	H.expect(H.waitText(alice, "Develop " .. name .. ": +" .. pays .. " gold"), "a tap says the goal in words")
 	H.expect(H.hasButton(alice, "Develop"), "and shows its province with its sheet")
 	H.expect(H.find(alice, "Missions") == nil, "the strip steps aside while a sheet is open")
 	H.shot(alice, "goal_tapped")
@@ -72,7 +74,7 @@ local function run()
 	Emulator.run(2)
 	H.expect(state.provinces[capital].development == level + 1, "the capital grew")
 	H.expect(state.missions[A].last and state.missions[A].last.done, "the goal is done")
-	H.expect(H.waitText(alice, "Mission done! Develop " .. name .. ": +40 gold"), "a toast says what it paid")
+	H.expect(H.waitText(alice, "Mission done! Develop " .. name .. ": +" .. pays .. " gold"), "a toast says what it paid")
 	H.shot(alice, "goal_done")
 	Emulator.press(alice, "✕") -- close the sheet
 	Emulator.run(M.RefillTicks + 1.5)

@@ -90,7 +90,8 @@ local function run()
 	Emulator.press(bob, "Cancel")
 	H.expect(state.nations[A].plagueUntil == nil, "Aurora is not plagued")
 
-	-- Rebels: a black 🏴 token that shows even zoomed out, unlike the neutral garrisons
+	-- Rebels: a black 🏴 token that shows even zoomed out, unlike the neutral garrisons (on Bob's screen: a Primordial
+	-- sees every army through the fog of war; Alice sees them only where her nation sees)
 	local rebelTarget
 	for id, p in state.provinces do
 		if p.owner == 4 and not p.isCapital and p.terrain ~= "Mountain" and (rebelTarget == nil or id < rebelTarget) then
@@ -109,14 +110,18 @@ local function run()
 		end
 	end
 	H.expect(rebels ~= nil and rebels.location == rebelTarget, "Rebels rose in " .. state.provinces[rebelTarget].name)
-	H.client(alice, "MapView").showWholeMap()
+	H.client(bob, "MapView").showWholeMap()
 	Emulator.run(1.5)
-	H.expect(H.badge(alice, rebels.id) == "3k" and select(2, H.badge(alice, rebels.id)) == "rebels", "Alice sees the Rebels token (flag, 3k) zoomed out")
-	H.expect(not H.iconText(alice, "shield", "", "Map"), "while garrisons stay hidden at that zoom")
-	H.shot(alice, "rebels")
-	H.client(alice, "MapView").centreOn(H.provinceMap(alice, rebelTarget), true)
+	H.expect(H.badge(bob, rebels.id) == "3k" and select(2, H.badge(bob, rebels.id)) == "rebels", "Bob sees the Rebels token (flag, 3k) zoomed out")
+	H.expect(not H.iconText(bob, "shield", "", "Map"), "while garrisons stay hidden at that zoom")
+	local Fog = require("../../../src/shared/Sim/Fog")
+	if not Fog.vision(state, A).provinces[rebelTarget] then
+		H.expect(H.mapObject(alice, "Army" .. rebels.id) == nil, "Alice has no token for Rebels out of her nation's sight")
+	end
+	H.shot(bob, "rebels")
+	H.client(bob, "MapView").centreOn(H.provinceMap(bob, rebelTarget), true)
 	Emulator.run(1.5)
-	H.shot(alice, "rebels_close")
+	H.shot(bob, "rebels_close")
 
 	-- rejoining: Bob leaves and comes back as himself, still the Primordial of Zephyr
 	Emulator.removeClient(bob)

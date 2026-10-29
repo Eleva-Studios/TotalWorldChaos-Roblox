@@ -121,7 +121,10 @@ local function run()
 	H.expect(fleet ~= nil and Navy.ships(fleet) == 3 and fleet.zone == vega, "3 starships launch into Vega Drift")
 	H.expect(state.nations[A].gold == gold - 75, "for 25 gold each")
 	H.expect(H.mapObject(alice, "Fleet" .. fleet.id) ~= nil, "a fleet token is on Alice's map")
-	H.expect(H.client(bob, "ClientState").fleet(fleet.id) ~= nil, "Bob sees the fleet too")
+	H.expect(
+		H.client(bob, "ClientState").fleet(fleet.id) == nil,
+		"Bob doesn't see it: Vega Drift is off none of his coasts (the fog of war)"
+	)
 
 	-- recruit 3 regiments of her race's line troop, pick the army up from the sheet, tap the fleet, Board
 	local line = Troops.ofRole(state.nations[A].race, "line")
@@ -240,6 +243,7 @@ local function run()
 		"the fleets meet in Lyra Reach"
 	)
 	Emulator.run(0.6)
+	H.expect(H.client(bob, "ClientState").fleet(fleet.id) ~= nil, "in Lyra Reach, off his coast, Bob sees Alice's fleet")
 	H.shot(alice, "sea_battle")
 	H.expect(waitText(alice, "Sea battle won in Lyra Reach", 15), "Alice: sea battle won")
 	H.expect(waitText(bob, "Sea battle lost in Lyra Reach", 10), "Bob: sea battle lost")

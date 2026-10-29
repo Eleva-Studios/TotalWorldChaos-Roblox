@@ -63,7 +63,8 @@ local lastResults: { [number]: string } = {} -- userId -> MatchFlow session of t
 local lastCommand: { [number]: number } = {} -- userId -> match tick of their last command (seat time at first)
 local afk: { [number]: boolean } = {} -- afk_flagged sent this match
 local cardsLogged: { [number]: number } = {} -- userId -> the last event card event_card was sent for (this match)
-local missionsLogged: { [number]: number } = {} -- userId -> the last mission `mission` was sent for (this match)
+-- userId -> the nation and how many of its closed missions `mission` was sent for (this match)
+local missionsLogged: { [number]: { nation: number?, count: number } } = {}
 local startsLogged = false
 local endLogged = false
 local shopSession: { [Player]: string } = {}
@@ -341,17 +342,21 @@ local function observePlayer(state: Types.MatchState, player: Player)
 			TelemetryService.send(e, player)
 		end
 	end
-	-- ...and their nation's last mission closed (done or expired), noted the same way on the first look
+	-- ...and every mission their nation closed since (done or expired; two can close on one tick), noted the same way
+	-- on the first look and whenever they play another nation
 	local board = if nationId and state.missions then state.missions[nationId] else nil
-	local closed = if board then board.last else nil
-	if missionsLogged[userId] == nil then
-		missionsLogged[userId] = if closed then closed.id else 0
-	elseif closed and missionsLogged[userId] ~= closed.id then
-		missionsLogged[userId] = closed.id
-		local e = Telemetry.mission(state, userId, closed)
-		if e then
-			TelemetryService.send(e, player)
+	local closedCount = if board then #board.closed else 0
+	local logged = missionsLogged[userId]
+	if logged == nil or logged.nation ~= nationId then
+		missionsLogged[userId] = { nation = nationId, count = closedCount }
+	elseif board and closedCount > logged.count then
+		for i = logged.count + 1, closedCount do
+			local e = Telemetry.mission(state, userId, board.closed[i])
+			if e then
+				TelemetryService.send(e, player)
+			end
 		end
+		logged.count = closedCount
 	end
 	local idleSince = lastCommand[userId] or state.tick
 	if state.result == nil and not afk[userId] and state.tick - idleSince >= Config.Progression.AfkTicks then
