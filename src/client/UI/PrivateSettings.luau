@@ -346,7 +346,10 @@ local function buildPanel()
 		l.LayoutOrder = order
 	end
 	onOff(morePage, 1, "medal", "Missions", "missions")
-	explain(2, "Every nation gets three short goals at a time (take a province, build, win battles, ally): each pays.")
+	explain(
+		2,
+		"Every nation gets three short goals at a time (take a province, build, win battles, ally), each with a reward."
+	)
 	onOff(morePage, 3, "eye", "Fog", "fog")
 	explain(
 		4,
