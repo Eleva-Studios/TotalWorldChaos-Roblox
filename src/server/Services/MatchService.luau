@@ -76,9 +76,20 @@ function MatchService.chooseMap(setup: Types.MatchSetup?): string
 	return MatchService.lockedMap() or setting or Config.DefaultMap
 end
 
+-- The fog of war the server forces on every match (a "FogOfWar" boolean attribute on Workspace, a Studio test
+-- switch: docs/STUDIO.md), or nil for the match setting (Config.Features.FogOfWar, a private server's choice).
+function MatchService.forcedFog(): boolean?
+	local fog = workspace:GetAttribute("FogOfWar")
+	return if type(fog) == "boolean" then fog else nil
+end
+
 -- A new match on a map. `setup`: the private server's settings for it (nil = the defaults).
 function MatchService.start(mapId: string, setup: Types.MatchSetup?): Types.MatchState
 	local newState = Match.new(Maps.get(mapId), setup)
+	local fog = MatchService.forcedFog()
+	if fog ~= nil and not newState.setup.sandbox then
+		newState.setup.settings.fog = fog
+	end
 	state = newState
 	rng = Rng.new(os.time()) -- battles get their random rolls from here; Sim never calls math.random
 	return newState

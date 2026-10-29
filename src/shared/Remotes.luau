@@ -50,6 +50,7 @@ local EVENTS = {
 	"Achievements", -- your AchievementView (on join and after every match)
 	"Boards", -- your BoardsView: weekly, friends and level boards (on join and after every refresh)
 	"EventCard", -- your nation's event cards (Types.EventCardView): to you alone, never in the delta
+	"Missions", -- your nation's missions (Types.MissionView): to you alone, never in the delta
 }
 local UNRELIABLE_EVENTS = { "ArmyPositions" }
 

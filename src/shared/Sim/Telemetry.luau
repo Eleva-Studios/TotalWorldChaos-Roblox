@@ -45,6 +45,7 @@ Telemetry.CUSTOM_EVENTS = {
 	-- the EU4 pack (docs/DESIGN.md)
 	"diplomacy_action",
 	"event_card",
+	"mission",
 }
 
 -- The EU4 pack's diplomatic actions diplomacy_action logs, by Command action (field 1).
@@ -442,6 +443,20 @@ function Telemetry.eventCard(state: MatchState, userId: number, outcome: Types.E
 	end
 	local how = (if outcome.auto then "timeout_" else "picked_") .. outcome.choice
 	return Telemetry.custom("event_card", 1, { outcome.event, state.mapId, how }, userId)
+end
+
+-- A player's mission closed (the EU4 pack, Sim.Missions): mission with its kind, the map, and how it ended ("done",
+-- or "expired" when it ran out of time or couldn't be done any more). nil without one.
+function Telemetry.mission(state: MatchState, userId: number, outcome: Types.MissionOutcome?): Event?
+	if outcome == nil then
+		return nil
+	end
+	return Telemetry.custom(
+		"mission",
+		1,
+		{ outcome.kind, state.mapId, if outcome.done then "done" else "expired" },
+		userId
+	)
 end
 
 -- The map vote is over: one map_vote per voter. round: "lobby" (the first vote on this server) or "next" (after

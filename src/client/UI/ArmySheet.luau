@@ -140,6 +140,11 @@ local function render()
 end
 
 -- dest and path: a destination to confirm with Go; board: a fleet to walk to and board, confirmed with Board.
+-- Is the sheet on screen? (The missions strip steps aside while a sheet is open.)
+function ArmySheet.isOpen(): boolean
+	return sheet ~= nil and sheet.Visible
+end
+
 function ArmySheet.show(armyId: number?, dest: number?, path: { number }?, board: Boarding?)
 	current = if armyId then { army = armyId, dest = dest, path = path, board = board } else nil
 	render()

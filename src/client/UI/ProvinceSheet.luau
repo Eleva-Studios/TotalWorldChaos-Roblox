@@ -468,6 +468,11 @@ local function render()
 	showRows()
 end
 
+-- Is the sheet on screen? (The missions strip steps aside while a sheet is open.)
+function ProvinceSheet.isOpen(): boolean
+	return sheet ~= nil and sheet.Visible
+end
+
 function ProvinceSheet.show(provinceId: number?)
 	if provinceId ~= selected then
 		shipPicker = false

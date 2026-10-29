@@ -125,6 +125,8 @@ function Tutorial.setup(state: MatchState, slot: number): TutorialState
 		end
 	end
 	state.setup.settings.events = false -- no event cards: the tutorial's prompts are enough to read
+	state.setup.settings.missions = false -- nor missions
+	state.setup.settings.fog = false -- and the whole map in sight: the tutorial points at armies far away
 	player.controller = "Player" -- held for the player until they arrive (Tutorial.seat)
 	player.userId = nil
 	Army.spawn(state, slot, player.capital, Config.Tutorial.StartRegiments * Config.Army.MenPerRegiment)

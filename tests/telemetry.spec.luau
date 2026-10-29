@@ -210,6 +210,17 @@ T.test("event_card says which event, the map, and whether the player picked or t
 	T.equal(logged(nil), nil)
 end)
 
+T.test("mission says which kind of goal, the map, and whether it was done or ran out", function()
+	local state = seated()
+	local function logged(outcome: Types.MissionOutcome?): string?
+		local e = Telemetry.mission(state, 101, outcome)
+		return if e then e.name .. ":" .. table.concat(e.fields, ",") else nil
+	end
+	T.equal(logged({ id = 3, kind = "Take", target = 12, done = true }), "mission:Take,skyshards,done")
+	T.equal(logged({ id = 4, kind = "Win", target = 0, done = false }), "mission:Win,skyshards,expired")
+	T.equal(logged(nil), nil)
+end)
+
 T.test("map_vote: one per voter with the round and the theme", function()
 	local lobby = Lobby.new(Maps.ids, nil)
 	T.expect((Lobby.vote(lobby, 202, "eldmoor")), "vote")

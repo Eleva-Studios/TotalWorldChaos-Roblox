@@ -327,6 +327,33 @@ local function sendArgs(label: string, ...)
 	return copied
 end
 
+-- What a remote call costs on the wire, roughly, by the sizes Roblox's network format uses: a type tag on every value,
+-- a number as a double (1 + 8 bytes), a string as its length and bytes, a table as its count and entries (a dictionary
+-- with each key as a string), plus about 9 bytes for the call itself (which remote, how many arguments). No
+-- compression is counted, so real traffic is at most this.
+local function wireSize(v): number
+	local t = type(v)
+	if t == "number" then
+		return 9
+	elseif t == "string" then
+		return 2 + #v
+	elseif t == "table" then
+		local n = 2
+		for k, val in v do
+			if type(k) == "string" then
+				n += 2 + #k
+			end
+			n += wireSize(val)
+		end
+		return n
+	end
+	return 2 -- nil, a boolean, an Instance reference (counted small)
+end
+Emulator.wireSize = wireSize
+
+-- Bytes each client was sent, by remote name: client name -> remote -> bytes (the soak's network check).
+Emulator.netBytes = {} :: { [string]: { [string]: number } }
+
 -- remote instance -> its peers on the other side, keyed by remote name
 local function serverRemoteFor(clientRemote)
 	return Emulator.server.dm:GetService("ReplicatedStorage").Remotes:FindFirstChild(clientRemote.Name)
@@ -354,6 +381,13 @@ for _, class in { "RemoteEvent", "UnreliableRemoteEvent" } do
 		end
 		local target = clientRemoteFor(remote, client)
 		local args = sendArgs("server->" .. client.name .. ":" .. remote.Name, ...)
+		local bytes = 9
+		for i = 1, args.n do
+			bytes += wireSize(args[i])
+		end
+		local perClient = Emulator.netBytes[client.name] or {}
+		Emulator.netBytes[client.name] = perClient
+		perClient[remote.Name] = (perClient[remote.Name] or 0) + bytes
 		task.defer(function()
 			eventOf(target, "OnClientEvent", class == "RemoteEvent"):Fire(table.unpack(args, 1, args.n))
 		end)

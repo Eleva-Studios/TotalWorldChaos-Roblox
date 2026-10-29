@@ -24,6 +24,7 @@ local function fresh(): Types.MatchState
 	local state = Match.new(Maps.get("skyshards"))
 	state.tick = Config.Phases.PeaceEndTick + 10
 	state.phase = "War"
+	state.setup.settings.fog = false -- what a caster sees has its own tests (fog.spec)
 	return state
 end
 

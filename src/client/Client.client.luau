@@ -27,6 +27,7 @@ local MapRenderer = require(Client.MapRenderer)
 local MapView = require(Client.MapView)
 local MapVote = require(Client.UI.MapVote)
 local Menu = require(Client.UI.Menu)
+local MissionStrip = require(Client.UI.Missions)
 local Nations = require(Client.UI.Nations)
 local Offers = require(Client.UI.Offers)
 local Powers = require(Client.UI.Powers)
@@ -292,6 +293,14 @@ local function showNation(nationId: number)
 	end
 end
 
+-- A mission's province (the strip's tiles): the map jumps there and shows its sheet.
+local function showProvince(provinceId: number)
+	if ClientState.map() then
+		MapView.centreOn(MapRenderer.centerOf(provinceId), true)
+		selectProvince(provinceId)
+	end
+end
+
 -- Listeners first (in draw order), then start listening to the server.
 MapRenderer.init()
 Hud.init(centreOnCapital, Nations.toggle, function()
@@ -336,6 +345,9 @@ FleetSheet.init(
 Offers.init()
 Insults.init()
 EventCard.init(Hud.toast)
+MissionStrip.init(Hud.toast, showProvince, function(): boolean
+	return ProvinceSheet.isOpen() or ArmySheet.isOpen() or FleetSheet.isOpen()
+end)
 Powers.init(Hud.toast, function()
 	selectProvince(nil) -- the power picker replaces any open sheet
 end)

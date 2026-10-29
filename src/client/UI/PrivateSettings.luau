@@ -23,8 +23,8 @@ local Widgets = require(script.Parent.Widgets)
 local Theme = Widgets.Theme
 local LABEL_WIDTH = 104
 local OPTION_WIDTH = 76
-local FEATURE_LABEL = 80 -- the EU4 pack's features share a row: a short label and narrow On/Off tabs each
-local FEATURE_OPTION = 46
+local FEATURE_LABEL = 84 -- on/off settings share a row two by two: a short label and narrow On/Off tabs each
+local FEATURE_OPTION = 44
 local HEADER_HEIGHT = 36
 local TEAM_CELL = Vector2.new(120, 36)
 local TEXT_SIZE = 14
@@ -76,6 +76,12 @@ function PrivateSettings.summary(s: Types.MatchSettings): string
 	if not s.events then
 		table.insert(parts, "no events")
 	end
+	if not s.missions then
+		table.insert(parts, "no missions")
+	end
+	if not s.fog then
+		table.insert(parts, "no fog of war")
+	end
 	if #s.teams > 0 then
 		table.insert(parts, "teams set")
 	end
@@ -111,8 +117,8 @@ local function option(parent: Frame, key: string, value: string | number | boole
 	table.insert(options, { button = b, key = key, value = value })
 end
 
--- The EU4 pack's on/off features (Settings.FEATURES) side by side in one row, each a short label and an On/Off pair,
--- so the teams below keep the room they need on a phone. features: { icon, label, setting key }.
+-- On/off settings two to a row (powers and disasters, and the EU4 pack's features, Settings.FEATURES), each a short
+-- label and an On/Off pair, so the teams below keep the room they need on a phone. features: { icon, label, key }.
 local function featureRow(parent: Instance, order: number, features: { { string } })
 	local f = Instance.new("Frame")
 	f.BackgroundTransparency = 1
@@ -271,14 +277,10 @@ local function buildPanel()
 		option(level, "difficulty", d, d)
 	end
 
-	local powers = row(right, 1, "sparkles", "Powers")
-	option(powers, "powers", true, "On")
-	option(powers, "powers", false, "Off")
-	local disasters = row(right, 2, "meteor", "Disasters")
-	option(disasters, "disasters", true, "On")
-	option(disasters, "disasters", false, "Off")
-	-- the EU4 pack: insults (with gifts and military access), and event cards with choices
-	featureRow(right, 3, { { "grudge", "Insults", "diplomacy" }, { "scroll", "Events", "events" } })
+	featureRow(right, 1, { { "sparkles", "Powers", "powers" }, { "meteor", "Disasters", "disasters" } })
+	-- the EU4 pack: insults (with gifts and military access), event cards with choices, missions, the fog of war
+	featureRow(right, 2, { { "grudge", "Insults", "diplomacy" }, { "scroll", "Events", "events" } })
+	featureRow(right, 3, { { "medal", "Missions", "missions" }, { "eye", "Fog", "fog" } })
 	local teamsTitle = Widgets.label(right, "Teams: tap a player (same team = allies)", TEXT_SIZE, 22)
 	teamsTitle.LayoutOrder = 4
 	Widgets.leadIcon(teamsTitle, "teams", Theme.size.icon)

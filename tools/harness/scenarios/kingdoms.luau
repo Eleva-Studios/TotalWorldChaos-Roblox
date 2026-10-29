@@ -165,4 +165,5 @@ local function run()
 	H.shot(alice, "recruit_buttons")
 end
 
-return { run = run }
+-- every nation's army in sight, for the pictures (what the fog of war hides has its own scenario: fog)
+return { run = run, attributes = { FogOfWar = false } }

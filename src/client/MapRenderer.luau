@@ -988,6 +988,31 @@ local function paintOwners()
 	PixelArt.setOwners(a, owners, colors, borders)
 end
 
+-- The fog of war (docs/DESIGN.md "Fog of war"): land your nation doesn't see under a light haze, from the snapshot's
+-- vision (none with the fog off, or when you see everything). The armies and fleets out of sight never reach this
+-- client at all: the server leaves them out of its snapshot and deltas.
+local function paintFog()
+	local a = art
+	local snapshot = ClientState.snapshot()
+	if a == nil or snapshot == nil then
+		return
+	end
+	local hidden: { [number]: boolean } = {}
+	local vision = snapshot.vision
+	if vision and not vision.all then
+		local seen: { [number]: boolean } = {}
+		for _, id in vision.provinces do
+			seen[id] = true
+		end
+		for id in a.boxes do
+			if not seen[id] then
+				hidden[id] = true
+			end
+		end
+	end
+	PixelArt.setFog(a, hidden)
+end
+
 -- Each nation's flag (its equipped cosmetic) on a little pole left of its capital (armies stand at the centre),
 -- while it holds the capital.
 local function refreshFlags()
@@ -1178,6 +1203,7 @@ local function paintMap()
 	if cached and cached.look == look then
 		art = cached
 		PixelArt.select(cached, nil)
+		paintFog()
 		PixelArt.invalidate(cached)
 		return
 	end
@@ -1198,6 +1224,7 @@ local function paintMap()
 				PixelArt.select(painted, old.selected)
 			end
 			paintOwners()
+			paintFog()
 			PixelArt.invalidate(painted)
 		end
 	end)
@@ -1343,6 +1370,12 @@ end
 
 -- A layer of the current map's canvas by name (nil before the first map), the map's size in map pixels, and a
 -- province's rough width in map pixels: for Effects, which draws on the "Effects" layer.
+-- Is this province under the fog of war's haze on this client's map? (For the harness and Studio checks.)
+function MapRenderer.fogged(provinceId: number): boolean
+	local a = art
+	return a ~= nil and a.fog[provinceId] == true
+end
+
 function MapRenderer.layer(name: string): Frame?
 	return layers[name]
 end
@@ -1915,6 +1948,7 @@ function MapRenderer.init()
 		if map then
 			build(map)
 			paintOwners()
+			paintFog()
 			local snapshot = ClientState.snapshot()
 			if snapshot then
 				for _, record in snapshot.provinces do
@@ -1936,6 +1970,9 @@ function MapRenderer.init()
 			paintOwners()
 			refreshCrowns()
 			refreshFlags()
+		end
+		if delta.vision then
+			paintFog()
 		end
 		if #delta.armies > 0 or #delta.removedArmies > 0 then
 			refreshArmies()

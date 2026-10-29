@@ -35,6 +35,7 @@ local function run()
 	H.shot(olivia, "settings_default")
 	local presses = { "Setting_minutes_15", "Setting_difficulty_Hard", "Setting_powers_false", "Setting_map_eldmoor" }
 	table.insert(presses, "Setting_events_false") -- the EU4 pack's event cards, beside Insults on one row
+	table.insert(presses, "Setting_fog_false") -- the fog of war, beside Missions on the next row
 	for _, name in presses do
 		Emulator.press(olivia, name)
 	end
@@ -49,6 +50,7 @@ local function run()
 	H.expect(s.minutes == 15 and s.difficulty == "Hard" and s.powers == false, "15 minutes, Hard bots, powers off")
 	H.expect(s.bots == 5 and s.map == "eldmoor", "5 bots, on Eldmoor")
 	H.expect(s.events == false and s.diplomacy == true, "no event cards; insults still on")
+	H.expect(s.fog == false and s.missions == true, "no fog of war; missions still on")
 	H.expect(#s.teams == 2 and s.teams[1].team == 1 and s.teams[2].team == 1, "Olivia and Pete are team 1")
 	H.expect(LobbyService.state().locked == "eldmoor", "the map setting locks the vote to Eldmoor")
 	H.expect(Emulator.findText(olivia, "custom rules") ~= nil, "the sheet says custom rules pay half")
@@ -61,6 +63,7 @@ local function run()
 	)
 	H.expect(Emulator.findText(pete, "powers off") ~= nil, "including powers off")
 	H.expect(Emulator.findText(pete, "no events") ~= nil, "and no events")
+	H.expect(Emulator.findText(pete, "no fog of war") ~= nil, "and no fog of war")
 	H.shot(pete, "vote_locked")
 
 	-- the vote runs out, nobody picks: the draft gives everyone a nation, then the match plays the settings
@@ -72,6 +75,7 @@ local function run()
 	local state = H.state()
 	H.expect(state.mapId == "eldmoor" and state.phase == "Peace", "the match started on Eldmoor in Peace")
 	H.expect(state.setup.private and state.setup.settings.minutes == 15, "the match setup carries the settings")
+	H.expect(state.setup.settings.fog == false, "the match plays without the fog of war")
 	local nations, bots = 0, 0
 	for _, n in state.nations do
 		nations += 1

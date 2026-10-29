@@ -741,6 +741,7 @@ T.test("a Meteor kills half of every troop type", function()
 	state.tick = Config.Phases.PeaceEndTick
 	state.phase = "War"
 	state.nations[ZEPHYR].charges = 2
+	state.setup.settings.fog = false -- what a caster sees has its own tests (fog.spec)
 	local army = Army.spawn(state, AURORA, id("Aurora Fields"), 3000, "Infantry")
 	Army.add(army, { Archers = 1000 })
 	T.expect((Primordial.use(state, { nation = ZEPHYR }, "Meteor", army.id)))

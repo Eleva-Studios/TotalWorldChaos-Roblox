@@ -397,6 +397,7 @@ T.test("an order or a power for an army that just merged reaches the stack it jo
 	state.tick = Config.Phases.PeaceEndTick + 10
 	state.phase = "War"
 	state.nations[ZEPHYR].charges = 5
+	state.setup.settings.fog = false -- what a caster sees has its own tests (fog.spec)
 	local ok, err = Commands.apply(state, ZEPHYR, { kind = "Power", power = "Meteor", target = b.id })
 	T.expect(ok, "Meteor on the merged id: " .. tostring(err))
 	T.expect(a.men < 5000, "it hit the stack")

@@ -178,6 +178,32 @@ export type EventCardView = {
 	lastAuto: boolean,
 }
 
+-- Missions (the EU4 pack, stage 3; Sim.Missions, docs/DESIGN.md "Missions"): a short goal of `kind` ("Take" | "Grow"
+-- | "Fort" | "Win" | "Ally"). `target` is the province it names (Take: the one to take, Grow: the capital; else 0);
+-- `base` and `need` are the count it started from and the count that finishes it (Grow: the capital's development,
+-- Fort: forts held, Win: battles won; Take and Ally: 0 and 1). It goes at untilTick if not done by then.
+export type Mission = { id: number, kind: string, target: ProvinceId, base: number, need: number, untilTick: number }
+-- What a goal came to: done (its reward paid), or not (out of time, or it couldn't be done any more).
+export type MissionOutcome = { id: number, kind: string, target: ProvinceId, done: boolean }
+-- One nation's goals: the open ones, the ticks its empty slots get a new one, the last one closed and how many it has
+-- done this match.
+export type MissionBoard = { missions: { Mission }, refills: { number }, last: MissionOutcome?, done: number }
+-- One goal as a player's client sees it: its progress as `have` out of `need` (counted from when it came).
+export type MissionInfo = { id: number, kind: string, target: number, have: number, need: number, untilTick: number }
+-- What a player's client is told about its own nation's goals, on its own remote, never in the delta everyone gets:
+-- the open goals and the last one closed (lastId 0 = none yet). Lists of flat records, for the network.
+export type MissionView = {
+	missions: { MissionInfo },
+	lastId: number,
+	lastKind: string,
+	lastTarget: number,
+	lastDone: boolean,
+}
+
+-- Fog of war (Sim.Fog, docs/DESIGN.md "Fog of war"): the land and the sea a player's nation sees, as sorted id lists
+-- (in its snapshot while the fog is on); all = true (and empty lists) when it sees everything (a Primordial).
+export type VisionData = { all: boolean, provinces: { ProvinceId }, zones: { ZoneId } }
+
 export type MatchResult = {
 	kind: "Domination" | "Alliance" | "Score",
 	winners: { NationId },
@@ -202,6 +228,8 @@ export type MatchSettings = {
 	-- the EU4 pack's features (defaults in Config.Features)
 	diplomacy: boolean, -- insults and their answers, gifts, military access
 	events: boolean, -- event cards with choices
+	missions: boolean, -- each nation's short goals with rewards
+	fog: boolean, -- fog of war: other nations' armies and fleets only where you can see
 }
 
 -- How a match was set up, read by Sim from MatchState (never from globals).
@@ -274,6 +302,9 @@ export type MatchState = {
 	chronicles: { [NationId]: Chronicle },
 	boosts: { Boost },
 	nextCardId: number,
+	-- the EU4 pack's missions (Sim.Missions): private to each nation, never in the snapshot
+	missions: { [NationId]: MissionBoard },
+	nextMissionId: number,
 }
 
 -- The lobby before a match (Sim.Lobby): the map vote ("Lobby"), then the nation draft ("Pick"). It lives outside

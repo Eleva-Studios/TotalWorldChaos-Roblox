@@ -2,6 +2,7 @@
 -- Snapshot/delta encoding and the intent rate limit.
 local Army = require("../src/shared/Sim/Army")
 local Config = require("../src/shared/Config")
+local Fog = require("../src/shared/Sim/Fog")
 local Maps = require("../src/shared/Maps")
 local Match = require("../src/shared/Sim/Match")
 local Navy = require("../src/shared/Sim/Navy")
@@ -185,36 +186,55 @@ T.test("sailing fleets ride the positions channel after the moving armies, zone 
 	T.equal(leg.to, 3)
 	T.equal(leg.progress, 0)
 
-	-- only the fleets Navy.visible shows the viewer (everyone sees every fleet for now)
-	local visible = Navy.visible
-	Navy.visible = function(_state, viewer, fleet)
-		return fleet.owner == viewer
+	-- with the fog of war, only what the viewer sees (Sim.Fog): its own fleet and army, never one out of sight
+	state.setup.settings.fog = true
+	local function ids(viewer: number): { [string]: boolean }
+		local out = {}
+		for _, q in Snapshot.positions(state, ticksToEnter, viewer) do
+			out[(if q.fleet then "fleet " else "army ") .. q.id] = true
+		end
+		return out
 	end
-	local ok, err = pcall(function()
-		T.equal(#Snapshot.positions(state, ticksToEnter, 1), 2, "nation 1 sees its own fleet")
-		T.equal(#Snapshot.positions(state, ticksToEnter, 2), 1, "nation 2 sees only the army")
-	end)
-	Navy.visible = visible
-	assert(ok, err)
+	T.expect(ids(1)["fleet " .. sailing.id], "nation 1 sees its own fleet sailing")
+	T.expect(ids(2)["army " .. army.id], "nation 2 sees its own army marching")
+	local far = Fog.vision(state, 3)
+	T.equal(ids(3)["fleet " .. sailing.id] == true, Fog.seesFleet(far, sailing), "nation 3: as far as it sees")
+	state.setup.settings.fog = false
+	T.equal(#Snapshot.positions(state, ticksToEnter, 3), 2, "the fog off: everyone sees every one")
 end)
 
-T.test("the snapshot holds only the fleets Navy.visible shows the viewer", function()
+T.test("the snapshot holds only the fleets Navy.visible shows the viewer (the fog of war)", function()
 	local state = Match.new(Maps.get("skyshards"))
-	Navy.spawn(state, 1, 1, 1)
-	Navy.spawn(state, 2, 2, 1)
-	-- everyone sees every fleet for now (the fog-of-war hook returns true)
-	T.equal(#Snapshot.full(state, nil, 1).fleets, 2)
-	T.equal(#Snapshot.full(state).fleets, 2)
-	local visible = Navy.visible
-	Navy.visible = function(_state, viewer, fleet)
-		return fleet.owner == viewer
+	state.setup.settings.fog = true
+	-- a zone off nation 1's coast, and one nation 1 doesn't see
+	local seen = Fog.vision(state, 1)
+	local near, far
+	for id in state.zones do
+		if seen.zones[id] then
+			near = near or id
+		else
+			far = far or id
+		end
 	end
-	local ok, err = pcall(function()
-		T.equal(#Snapshot.full(state, nil, 1).fleets, 1)
-		T.equal(Snapshot.fleets(state, 2)[1].owner, 2)
-	end)
-	Navy.visible = visible
-	assert(ok, err)
+	assert(near and far, "skyshards has zones in and out of nation 1's sight")
+	local mine = Navy.spawn(state, 1, far, 1)
+	local close = Navy.spawn(state, 2, near, 1)
+	local hidden = Navy.spawn(state, 2, far, 1)
+	T.expect(Navy.visible(state, 1, mine), "your own fleet, wherever it is")
+	T.expect(Navy.visible(state, 1, close), "a fleet off your coast")
+	-- your fleet sees its zone: the other fleet there too
+	T.expect(Navy.visible(state, 1, hidden), "a fleet in the zone your fleet is in")
+	state.fleets[mine.id] = nil
+	T.expect(not Navy.visible(state, 1, hidden), "a fleet out of sight")
+	local owners = {}
+	for _, f in Snapshot.full(state, nil, 1).fleets do
+		owners[f.id] = true
+	end
+	T.expect(owners[close.id] and not owners[hidden.id], "the snapshot as nation 1 sees it")
+	T.equal(#Snapshot.full(state).fleets, 2, "no viewer: every fleet")
+	T.equal(#Snapshot.fleets(state, 2), 2, "nation 2 sees its own")
+	state.setup.settings.fog = false
+	T.equal(#Snapshot.full(state, nil, 1).fleets, 2, "the fog off: every fleet")
 end)
 
 T.test("rate limit allows 10 intents per second per player", function()

@@ -1,9 +1,11 @@
 --!strict
 -- What the server sends clients: a full snapshot on join, then a delta of changed records every tick.
--- Records are flat arrays of plain values because RemoteEvents mangle sparse or mixed tables.
+-- Records are flat arrays of plain values because RemoteEvents mangle sparse or mixed tables. With the fog of war on
+-- (Sim.Fog), a player's snapshot holds only the armies and fleets their nation sees, and what it sees (vision).
 -- Neutral owner and "no player" are sent as 0 instead of nil for the same reason. Pure Luau (tested with Lune).
 
 local Config = require("./Config")
+local Fog = require("./Sim/Fog")
 local Navy = require("./Sim/Navy")
 local Troops = require("./Sim/Troops")
 local Types = require("./Types")
@@ -111,6 +113,7 @@ export type SnapshotData = {
 	cosmetics: { Types.NationCosmetics }, -- each nation's equipped looks, next to MatchState (Sim.Shop)
 	theme: string, -- the map theme everyone sees (MatchState.theme; "" = classic). Set before the match starts.
 	sandbox: Types.SandboxState?, -- a sandbox world's controls (time, disasters); nil in a match
+	vision: Types.VisionData?, -- what the viewer sees while the fog of war is on (Sim.Fog.lists); nil with it off
 }
 
 export type DeltaData = {
@@ -128,6 +131,7 @@ export type DeltaData = {
 	result: Types.MatchResult?, -- only when it changed
 	cosmetics: { Types.NationCosmetics }?, -- only when it changed
 	sandbox: Types.SandboxState?, -- only when it changed
+	vision: Types.VisionData?, -- only when it changed
 	events: { Types.MatchEvent },
 }
 
@@ -142,13 +146,12 @@ local function sortedKeys(t: { [number]: any }): { number }
 	return keys
 end
 
--- The fleets `viewer` sees (Sim.Navy.visible, the one fog-of-war hook; 0 = no nation, a spectator's view).
-function Snapshot.fleets(state: MatchState, viewer: number): { FleetRecord }
+local function fleetsSeen(state: MatchState, vision: Fog.Vision): { FleetRecord }
 	local out = {}
 	local fleets = state.fleets or {}
 	for _, id in sortedKeys(fleets) do
 		local f = fleets[id]
-		if Navy.visible(state, viewer, f) then
+		if Fog.seesFleet(vision, f) then
 			local nextZone = f.path[1]
 			table.insert(out, {
 				id = f.id,
@@ -169,10 +172,17 @@ function Snapshot.fleets(state: MatchState, viewer: number): { FleetRecord }
 	return out
 end
 
+-- The fleets `viewer` sees (Sim.Navy.visible: the fog of war; 0 = no nation, a spectator's view: every fleet).
+function Snapshot.fleets(state: MatchState, viewer: number): { FleetRecord }
+	return fleetsSeen(state, Fog.vision(state, viewer))
+end
+
 -- cosmetics (optional): every nation's equipped cosmetics (Sim.Shop.nationCosmetics); none = an empty list.
--- viewer (optional): whose eyes the fleets are seen with (Snapshot.fleets); everyone sees every fleet for now, so
--- the Replicator sends one view to all.
+-- viewer (optional): whose eyes the armies and fleets are seen with (Sim.Fog); nil or 0 sees everything, which is
+-- what the Replicator sends everyone while the fog is off (and turns into each player's view with Snapshot.view
+-- while it is on).
 function Snapshot.full(state: MatchState, cosmetics: { Types.NationCosmetics }?, viewer: number?): SnapshotData
+	local vision = Fog.vision(state, viewer or 0)
 	local provinces = {}
 	for _, id in sortedKeys(state.provinces) do
 		local p = state.provinces[id]
@@ -215,6 +225,9 @@ function Snapshot.full(state: MatchState, cosmetics: { Types.NationCosmetics }?,
 	local armies = {}
 	for _, id in sortedKeys(state.armies) do
 		local a = state.armies[id]
+		if not Fog.seesArmy(vision, a) then
+			continue
+		end
 		table.insert(armies, {
 			id = a.id,
 			owner = a.owner,
@@ -236,7 +249,7 @@ function Snapshot.full(state: MatchState, cosmetics: { Types.NationCosmetics }?,
 		provinces = provinces,
 		nations = nations,
 		armies = armies,
-		fleets = Snapshot.fleets(state, viewer or 0),
+		fleets = fleetsSeen(state, vision),
 		diplomacy = Snapshot.diplomacy(state),
 		primordials = Snapshot.primordials(state),
 		powerCooldowns = Snapshot.powerCooldowns(state),
@@ -245,7 +258,44 @@ function Snapshot.full(state: MatchState, cosmetics: { Types.NationCosmetics }?,
 		theme = state.theme or "",
 		-- a copy: the last snapshot sent is the baseline the next delta is diffed against
 		sandbox = if state.sandbox then table.clone(state.sandbox) else nil,
+		vision = if Fog.enabled(state) then Fog.lists(vision) else nil,
 	}
+end
+
+-- One viewer's snapshot from the all-seeing one (Snapshot.full with no viewer): only the armies and fleets `vision`
+-- sees, and the vision itself (nil with the fog off). A shallow copy: the records are shared, never changed.
+function Snapshot.view(all: SnapshotData, state: MatchState, vision: Fog.Vision): SnapshotData
+	local out = table.clone(all)
+	local armies = {}
+	for _, a in all.armies do
+		if Fog.seesArmyAt(vision, a.owner, a.location, a.rebel) then
+			table.insert(armies, a)
+		end
+	end
+	local fleets = {}
+	for _, f in all.fleets do
+		if Fog.seesFleetAt(vision, f.owner, f.zone) then
+			table.insert(fleets, f)
+		end
+	end
+	out.armies = armies
+	out.fleets = fleets
+	out.vision = if Fog.enabled(state) then Fog.lists(vision) else nil
+	return out
+end
+
+-- This tick's events that `vision` may hear about (Sim.Fog.seesEvent: none that gives away a unit out of sight).
+function Snapshot.events(events: { Types.MatchEvent }, vision: Fog.Vision): { Types.MatchEvent }
+	if vision.all then
+		return events
+	end
+	local out = {}
+	for _, e in events do
+		if Fog.seesEvent(vision, e) then
+			table.insert(out, e)
+		end
+	end
+	return out
 end
 
 function Snapshot.powerCooldowns(state: MatchState): { CooldownRecord }
@@ -308,7 +358,8 @@ function Snapshot.diplomacy(state: MatchState): DiplomacyData
 	}
 end
 
--- Moving armies, then the sailing fleets `viewer` sees (as Snapshot.fleets), for the unreliable ArmyPositions remote.
+-- The moving armies and sailing fleets `viewer` sees (Sim.Fog; nil or 0: all of them), for the unreliable ArmyPositions
+-- remote.
 -- `progress` is 0..1 towards `to`. ticksToEnter(province, army): the ticks that army takes to step into that province
 -- (Sim.Movement.moveTicks); a fleet takes Config.Navy.MoveTicks to sail into the next zone.
 function Snapshot.positions(
@@ -317,10 +368,11 @@ function Snapshot.positions(
 	viewer: number?
 ): { Position }
 	local out = {}
+	local vision = Fog.vision(state, viewer or 0)
 	for _, id in sortedKeys(state.armies) do
 		local a = state.armies[id]
 		local nextId = a.path[1]
-		if nextId and not a.inBattle then
+		if nextId and not a.inBattle and Fog.seesArmy(vision, a) then
 			table.insert(out, {
 				id = a.id,
 				from = a.location,
@@ -334,7 +386,7 @@ function Snapshot.positions(
 	for _, id in sortedKeys(fleets) do
 		local f = fleets[id]
 		local nextZone = f.path[1]
-		if nextZone and not f.inBattle and Navy.visible(state, viewer or 0, f) then
+		if nextZone and not f.inBattle and Fog.seesFleet(vision, f) then
 			table.insert(out, {
 				id = f.id,
 				from = f.zone,
@@ -413,19 +465,59 @@ local function gone<T>(before: { T }, after: { T }): { number }
 	return out
 end
 
+local SEES_ALL: Types.VisionData = { all = true, provinces = {}, zones = {} }
+
+-- Did what a viewer sees change? (Compared field by field: cheaper than encoding it every tick for every player.)
+local function sameVision(a: Types.VisionData?, b: Types.VisionData?): boolean
+	if a == nil or b == nil then
+		return a == b
+	end
+	if a.all ~= b.all or #a.provinces ~= #b.provinces or #a.zones ~= #b.zones then
+		return false
+	end
+	for i, id in a.provinces do
+		if b.provinces[i] ~= id then
+			return false
+		end
+	end
+	for i, id in a.zones do
+		if b.zones[i] ~= id then
+			return false
+		end
+	end
+	return true
+end
+
+local function empty(delta: DeltaData, before: SnapshotData, after: SnapshotData): boolean
+	return #delta.provinces == 0
+		and #delta.nations == 0
+		and #delta.armies == 0
+		and #delta.removedArmies == 0
+		and #delta.fleets == 0
+		and #delta.removedFleets == 0
+		and before.phase == after.phase
+		and delta.diplomacy == nil
+		and delta.primordials == nil
+		and delta.powerCooldowns == nil
+		and delta.result == nil
+		and delta.cosmetics == nil
+		and delta.sandbox == nil
+		and delta.vision == nil
+		and #delta.events == 0
+end
+
 -- Records that differ between two snapshots, plus this tick's events. Returns nil when nothing changed but the tick.
+-- (A vision gone, the fog off from now on, travels as "sees everything", since nil means unchanged.)
 function Snapshot.diff(before: SnapshotData, after: SnapshotData, events: { Types.MatchEvent }?): DeltaData?
-	local removed = gone(before.armies, after.armies)
-	local removedFleets = gone(before.fleets, after.fleets)
 	local delta: DeltaData = {
 		tick = after.tick,
 		phase = after.phase,
 		provinces = changed(before.provinces, after.provinces),
 		nations = changed(before.nations, after.nations),
 		armies = changed(before.armies, after.armies),
-		removedArmies = removed,
+		removedArmies = gone(before.armies, after.armies),
 		fleets = changed(before.fleets, after.fleets),
-		removedFleets = removedFleets,
+		removedFleets = gone(before.fleets, after.fleets),
 		diplomacy = if encode(before.diplomacy) ~= encode(after.diplomacy) then after.diplomacy else nil,
 		primordials = if encode(before.primordials) ~= encode(after.primordials) then after.primordials else nil,
 		powerCooldowns = if encode(before.powerCooldowns or {}) ~= encode(after.powerCooldowns or {})
@@ -434,27 +526,41 @@ function Snapshot.diff(before: SnapshotData, after: SnapshotData, events: { Type
 		result = if encode(before.result) ~= encode(after.result) then after.result else nil,
 		cosmetics = if encode(before.cosmetics) ~= encode(after.cosmetics) then after.cosmetics else nil,
 		sandbox = if encode(before.sandbox) ~= encode(after.sandbox) then after.sandbox else nil,
+		vision = if sameVision(before.vision, after.vision) then nil else after.vision or SEES_ALL,
 		events = if events then table.clone(events) else {},
 	}
-	if
-		#delta.provinces == 0
-		and #delta.nations == 0
-		and #delta.armies == 0
-		and #removed == 0
-		and #delta.fleets == 0
-		and #removedFleets == 0
-		and before.phase == after.phase
-		and delta.diplomacy == nil
-		and delta.primordials == nil
-		and delta.powerCooldowns == nil
-		and delta.result == nil
-		and delta.cosmetics == nil
-		and delta.sandbox == nil
-		and #delta.events == 0
-	then
-		return nil
-	end
-	return delta
+	return if empty(delta, before, after) then nil else delta
+end
+
+-- One player's delta while the fog of war is on, without diffing again what everyone sees alike: `shared` is the
+-- delta between the last two all-seeing snapshots (Snapshot.diff; nil when nothing changed), whose provinces,
+-- nations, diplomacy and the rest are the same for every player; then this view's own armies, fleets and vision
+-- against what the player was last sent (`before`), and `events`, the ones this player may hear about.
+function Snapshot.diffView(
+	before: SnapshotData,
+	after: SnapshotData,
+	shared: DeltaData?,
+	events: { Types.MatchEvent }
+): DeltaData?
+	local delta: DeltaData = {
+		tick = after.tick,
+		phase = after.phase,
+		provinces = if shared then shared.provinces else {},
+		nations = if shared then shared.nations else {},
+		armies = changed(before.armies, after.armies),
+		removedArmies = gone(before.armies, after.armies),
+		fleets = changed(before.fleets, after.fleets),
+		removedFleets = gone(before.fleets, after.fleets),
+		diplomacy = if shared then shared.diplomacy else nil,
+		primordials = if shared then shared.primordials else nil,
+		powerCooldowns = if shared then shared.powerCooldowns else nil,
+		result = if shared then shared.result else nil,
+		cosmetics = if shared then shared.cosmetics else nil,
+		sandbox = if shared then shared.sandbox else nil,
+		vision = if sameVision(before.vision, after.vision) then nil else after.vision or SEES_ALL,
+		events = table.clone(events),
+	}
+	return if empty(delta, before, after) then nil else delta
 end
 
 local function merge<T>(list: { T }, updates: { T }): { T }
@@ -517,6 +623,9 @@ function Snapshot.apply(snapshot: SnapshotData, delta: DeltaData): SnapshotData
 	end
 	if delta.cosmetics then
 		snapshot.cosmetics = delta.cosmetics
+	end
+	if delta.vision then
+		snapshot.vision = delta.vision
 	end
 	snapshot.armies = without(snapshot.armies, delta.removedArmies)
 	snapshot.fleets = without(snapshot.fleets, delta.removedFleets)

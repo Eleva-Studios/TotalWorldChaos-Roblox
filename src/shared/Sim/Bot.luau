@@ -8,9 +8,13 @@
 -- nothing against through its land, insults back now and then, and now and then insults a rival. An insulted
 -- bot leans towards war with its insulter: that nation is its first war target, at Config.Bots.GrudgeAttackRatio of
 -- its usual attack ratio.
+-- Missions (Sim.Missions): a bot gets the same goals as a player and leans towards them: its Take goal's province is
+-- the first target its stacks look at, and its build step pays for the capital's next level (Grow) or a fort (Fort)
+-- before anything else.
 -- Bots send the same commands players do, through CommandRouter, and every command is dry-run against
 -- Sim/Commands first, so a bot almost never sends one the server refuses. No cheating: bots read the same state
--- any player could see and pay full price for everything.
+-- any player could see and pay full price for everything; with the fog of war on, other nations' armies out of its
+-- sight (Sim.Fog) don't exist for its plans.
 --
 -- Bot.plan is pure: state + nation + rng + difficulty (+ an optional memory the caller keeps) -> commands.
 -- Bot.step does the scheduling for a whole match (who plans this tick), for AIService and headless runs.
@@ -21,6 +25,8 @@ local Config = require("../Config")
 local Diplomacy = require("./Diplomacy")
 local Economy = require("./Economy")
 local EventCards = require("./EventCards")
+local Fog = require("./Fog")
+local Missions = require("./Missions")
 local Pathing = require("./Pathing")
 local Primordial = require("./Primordial")
 local Races = require("./Races")
@@ -128,6 +134,8 @@ type Ctx = {
 	grudge: { [number]: boolean }, -- nations that insulted me (I hold a grudge against them)
 	targeted: { [number]: boolean }, -- provinces my armies stand in (abroad) or are marching to
 	reserved: { [number]: number }, -- army id -> where the threat it guards against stands
+	vision: Fog.Vision, -- what I see (the fog of war): other nations' armies out of sight don't exist for me
+	goals: Missions.Goals, -- my missions' province and buildings (Sim.Missions)
 }
 
 local function sortedKeys(t: { [number]: any }): { number }
@@ -170,8 +178,12 @@ local function context(state: MatchState, me: number, rng: Rng.Rng, settings: Se
 	local men = 0
 	local troopMen: { [string]: number } = {}
 	local targeted = {}
+	local vision = Fog.vision(state, me)
 	for _, id in sortedKeys(state.armies) do
 		local a = state.armies[id]
+		if not Fog.seesArmy(vision, a) then
+			continue -- out of sight (the fog of war): a bot plans with what a player would see
+		end
 		if a.owner == me then
 			for troop, n in a.troops do
 				troopMen[troop] = (troopMen[troop] or 0) + n
@@ -222,6 +234,8 @@ local function context(state: MatchState, me: number, rng: Rng.Rng, settings: Se
 		grudge = grudge,
 		targeted = targeted,
 		reserved = {},
+		vision = vision,
+		goals = Missions.goals(state, me),
 	}
 end
 
@@ -361,8 +375,13 @@ local function reachable(ctx: Ctx, from: number): ({ number }, { [number]: numbe
 end
 
 -- The nearest province `want` accepts that this army can reach with a clear route; a random one among equally
--- near ones, so matches with different seeds play out differently.
+-- near ones, so matches with different seeds play out differently. My Take mission's province comes first when
+-- `want` accepts it (Sim.Missions).
 local function pickTarget(ctx: Ctx, army: Army, want: (number) -> boolean): number?
+	local goal = ctx.goals.take
+	if goal and goal ~= army.location and want(goal) and clearRoute(ctx, army, goal) then
+		return goal
+	end
 	local order, dist = reachable(ctx, army.location)
 	local checks = 0
 	local i = 1
@@ -804,12 +823,12 @@ end
 
 -- 4. Attack ----------------------------------------------------------------------------------------------
 
--- The men of a nation and its allies.
+-- The men of a nation and its allies (those I can see).
 local function sideMen(ctx: Ctx, nationId: number): number
 	local members = Diplomacy.allianceMembers(ctx.state, nationId)
 	local n = 0
 	for _, a in ctx.state.armies do
-		if table.find(members, a.owner) then
+		if table.find(members, a.owner) and Fog.seesArmy(ctx.vision, a) then
 			n += a.men
 		end
 	end
@@ -1027,6 +1046,14 @@ local function build(ctx: Ctx): { Command }?
 	local spare = ctx.nation.gold - Config.Bots.UpkeepReserveMonths * ctx.upkeep
 	if spare <= 0 then
 		return nil
+	end
+	-- my missions first: the capital's next level (Grow), a fort (Fort), when the spare gold pays for it
+	local goal = Missions.botOrder(state, ctx.me, spare)
+	if goal then
+		local result = try(ctx, goal)
+		if result then
+			return result
+		end
 	end
 	local hasBarracks = false
 	local inland, border = {}, {}
@@ -1290,6 +1317,7 @@ local function primordial(ctx: Ctx): { Command }?
 		if
 			ctx.isEnemy[a.owner]
 			and owner
+			and Fog.seesArmy(ctx.vision, a)
 			and owner.powerImmuneUntil <= state.tick
 			and Primordial.cooldownLeft(state, { nation = ctx.me }, a.owner) == 0
 			and playerWarAllowed(ctx, a.owner)

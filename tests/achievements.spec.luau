@@ -267,6 +267,7 @@ T.test("observe: neutral land in Peace, Meteor kills, forts that held, allies an
 		end
 	end
 	local army = Army.spawn(state, 3, target, 4000)
+	state.setup.settings.fog = false -- what a caster sees has its own tests (fog.spec)
 	local ok, err = Commands.apply(state, 1, { kind = "Power", power = "Meteor", target = army.id })
 	T.expect(ok, err)
 	T.equal(state.events[#state.events].men, 2000)

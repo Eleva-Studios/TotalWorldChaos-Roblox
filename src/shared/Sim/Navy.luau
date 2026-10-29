@@ -20,13 +20,14 @@
 --
 -- Tick order (Sim.Tick): Navy.step before armies move (fleets sail, armies board, fleets land, fleets merge),
 -- Navy.battleStep after the land battles, Navy.blockades before sieges and pay.
--- Who sees which fleet: Navy.visible, the one place fog of war plugs in.
+-- Who sees which fleet: Navy.visible, which asks the fog of war (Sim.Fog).
 
 local Army = require("./Army")
 local CatchUp = require("./CatchUp")
 local Config = require("../Config")
 local Diplomacy = require("./Diplomacy")
 local Events = require("./Events")
+local Fog = require("./Fog")
 local Pathing = require("./Pathing")
 local Rng = require("./Rng")
 local Troops = require("./Troops")
@@ -142,10 +143,10 @@ function Navy.destination(fleet: Fleet): number
 	return if #fleet.path > 0 then fleet.path[#fleet.path] else fleet.zone
 end
 
--- Who sees which fleet. Everyone sees every fleet for now: fog of war (the EU4 pack) plugs in here, and bots and
--- clients ask here before they act on a fleet they don't own.
-function Navy.visible(_state: MatchState, _viewer: number, _fleet: Fleet): boolean
-	return true
+-- Who sees which fleet: the viewer's own and its allies', and the others in a zone it sees while the fog of war is on
+-- (Sim.Fog; everyone sees every fleet with it off). Bots ask here before they act on a fleet they don't own.
+function Navy.visible(state: MatchState, viewer: number, fleet: Fleet): boolean
+	return Fog.seesFleet(Fog.vision(state, viewer), fleet)
 end
 
 -- Zones and coasts ---------------------------------------------------------------------------------------------

@@ -8,6 +8,7 @@ local Diplomacy = require("./Diplomacy")
 local Economy = require("./Economy")
 local EventCards = require("./EventCards")
 local Match = require("./Match")
+local Missions = require("./Missions")
 local Movement = require("./Movement")
 local Navy = require("./Navy")
 local Primordial = require("./Primordial")
@@ -41,7 +42,8 @@ function Tick.advance(state: MatchState, rng: Rng.Rng): Types.Phase?
 	Primordial.step(state, rng) -- 6: eliminations, charges, effect timers, Cataclysm disasters
 	-- 7: bots (Phase 3)
 	Diplomacy.expire(state) -- 8: offers, insults' answer windows...
-	EventCards.step(state, rng) -- ...and event cards (the default choice), then new cards
+	EventCards.step(state, rng) -- ...event cards (the default choice), then new cards...
+	Missions.step(state, rng) -- ...and missions: rewards for goals done, new goals in empty slots
 	if state.setup.sandbox then
 		-- a sandbox world never ends: no win check and no last tick (Sim.Sandbox)
 		return if state.phase ~= before then state.phase else nil

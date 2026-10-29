@@ -15,7 +15,7 @@ A 25-minute map PvP match: 10 nations on one map expand, fight and ally, and pla
 
 | Source | Keep | Cut |
 | --- | --- | --- |
-| EU4 | Provinces, development, armies on a map, sieges, alliances, war and peace, coalitions against the leader | Trade nodes, estates, missions, ideas, religion, rebels, ship types and admirals (navies are one ship per map), war score, most modifiers |
+| EU4 | Provinces, development, armies on a map, sieges, alliances, war and peace, coalitions against the leader, and the EU4 pack: insults, gifts and military access, events with choices, missions (a few short goals at a time, each with a clear reward), fog of war | Trade nodes, estates, mission trees, ideas, religion, rebels, ship types and admirals (navies are one ship per map), war score, most modifiers |
 | WorldBox | World powers (here: Primordial powers), disasters, the four classic races (and a cast of peoples for every map), watching borders spread across the map, the pixel-art map look | Individual units, creatures, sandbox world editing |
 
 ## Match structure
@@ -33,7 +33,7 @@ A match runs 25 minutes in six phases and always ends with a winner: a nation ho
 
 **Phases**
 
-1. **Lobby (60 s):** players join and vote on the map with three cards (tap a card, tap it again to vote). Most votes wins; a tie, or no votes, is settled at random. A server locked to one map (Workspace `MapId`, or a private server's map setting) shows only that card and skips the vote. On a private server the owner changes the next match's settings here (`docs/MONETIZATION.md` 3.4): length, Peace, bots, powers, disasters, insults (see Diplomacy), teams, map and theme. A public server's first match has no vote: the first player to choose Play online picks the map ("Start menu" below).
+1. **Lobby (60 s):** players join and vote on the map with three cards (tap a card, tap it again to vote). Most votes wins; a tie, or no votes, is settled at random. A server locked to one map (Workspace `MapId`, or a private server's map setting) shows only that card and skips the vote. On a private server the owner changes the next match's settings here (`docs/MONETIZATION.md` 3.4): length, Peace, bots, powers, disasters, insults (see Diplomacy), events, missions, fog of war, teams, map and theme. A public server's first match has no vote: the first player to choose Play online picks the map ("Start menu" below).
 2. **Pick (up to 30 s):** the chosen map shows every nation's start territory, and players pick a start nation one at a time in a random draft order, by tapping its land (then confirming) or its name in the list. Each turn lasts 30 s ÷ players (3–8 s); a turn that runs out picks a random free nation. Someone who joins during the draft goes to the end of the order. Bots take the rest. The match clock starts at 0:00 when the draft ends.
 3. **Peace (0–3 min):** no wars between nations; expand into neutral provinces and build.
 4. **Open war (3–20 min):** everything unlocked.
@@ -370,6 +370,33 @@ The rules:
 - **Bots** answer through the same command, once a card, on their first plan after it comes: the affordable choice worth more gold (`Config.Bots.EventWorth`: regiments count double at war, a boost at the bot's income now).
 - **Analytics:** `event_card` (the event, the map, and `picked_N` or `timeout_N`; `docs/LAUNCH.md`).
 
+### Missions
+
+**Missions** (the EU4 pack, stage 3). A match setting, `missions`, on by default (`Config.Features.Missions`); a private server's owner can turn it off ("Missions", beside "Fog" on the settings sheet's second row of EU4-pack switches). Off isn't a custom rule (full rewards): every nation gets the same goals, so a match without them is no easier. Rules: `Sim/Missions.luau`; numbers: `Config.Missions`; the words: `Shared/Flavour/Missions.luau`; balance: `docs/BALANCE.md` section 22. The tutorial match has none.
+
+- **Goals:** every living nation has three short, concrete goals at a time, each of another kind, with a clear reward (about 30–60 gold's worth, counted like event cards: 100 manpower = 1 gold, a regiment 10 gold and 1,000 manpower):
+  - **Take** a named province next to your land (in Peace a neutral one; from War on anyone's but an ally's or a truce partner's): 60 gold.
+  - **Develop** your capital one level: 40 gold.
+  - **Build a fort:** 4,000 manpower.
+  - **Win 5 battles** (a neutral garrison counts): 2 regiments of your race's line troop at your capital.
+  - **Join an alliance** (only for a nation in none): 50 gold.
+- **Timing:** nation 1's first goals come 20 s into the match, each next nation's 1 s later, in Peace, War and the Cataclysm. A goal pays the second it is done (the server sees it: there is nothing to press). A goal not done in 5 minutes goes, and so does one that can't be done any more (its province went to an ally, the capital fell), with nothing paid. A closed goal's slot gets a goal of another kind 20 s later. Goals count from when they came (a fort or a battle won before doesn't count).
+- **Bots** get goals by the same rules and lean towards them: the Take goal's province is the first target their armies look at (when they would attack it anyway), and their build step pays for the capital's next level or a fort first.
+- **Who sees what:** goals are private, like event cards: the server sends each player their own nation's (`Missions`, never in the delta everyone gets), by kind and province; the words live on the client.
+- **On screen:** a "Missions" plate in the top-right column under the offers: three slot tiles (the build group's bronze), each with its icon (a flag, an up arrow, a castle, crossed swords, a handshake), its province (Take) or its progress ("2/5"), and its reward as icon chips (gold 60, manpower 4k, two line-troop regiments). Tap one: the map shows its province with its sheet, and a toast says the goal in words with the time left ("🏅 Take Kent: +60 gold · 4:12 left"). Done: "🏅 Mission done! Take Kent: +60 gold"; gone: "⌛ Mission over: Take Kent". The strip steps aside while the column holds an event card, an insult to answer or an offer (so the column never reaches the power button on a 375 px phone) and while a bottom sheet is open (it reaches up under the column), and comes back after.
+- **Analytics:** `mission` (its kind, the map, `done` or `expired`; `docs/LAUNCH.md`).
+
+### Fog of war
+
+**Fog of war** (the EU4 pack, stage 4). On by default with one Config line (`Config.Features.FogOfWar`); a private server's owner can turn it off (the "Fog" switch beside "Missions"); Studio's Workspace switch `FogOfWar` (`false` or `true`) overrides both from the next match. Off isn't a custom rule: it hides the same from everyone. The tutorial and the sandbox play without it. Rules: `Sim/Fog.luau`; numbers: `Config.Fog`; evidence: `docs/BALANCE.md` section 23.
+
+- **A nation sees:** its own provinces and the land next to them (`Config.Fog.LandSight`, 1 step), the provinces its armies stand in (`ArmySight` 0: just those), the sea zones off its coasts and the zones its fleets are in. Allies share what they see.
+- **Public:** map ownership: who holds which province, development, buildings, sieges, battles and blockades on the map, the nations' gold, manpower and races, wars, alliances, truces and offers. Neutral garrisons never move and stay in sight.
+- **Hidden:** other nations' armies and fleets, and Rebels, outside that vision, and the events that would give one away (a merge, a landing, someone else's battle or sea battle out of sight; your own battles always reach you). A Primordial (an eliminated player) and a player in the start menu see everything. `Navy.visible` asks the fog about fleets.
+- **Replication:** with the fog on, each player gets their own delta and positions: the armies and fleets their nation sees, its vision (sorted province and zone ids, sent when it changes) and the events that give nothing away. Players who see the same (a nation and its allies; everyone who sees everything) share one view, worked out once a tick, and each player's delta is diffed against what that player was last sent. With it off, one delta and one positions stream go to everyone, as before. Network and server cost: see "Performance budget".
+- **Bots obey it:** a bot plans with the armies its nation sees (threats, targets, the odds of a war, its Meteor). The server refuses a power aimed at an army out of the caster nation's sight as if there were none (`UnknownArmy`), so a client can't guess hidden army ids either.
+- **On the client:** land out of sight lies under a light pale haze (38%) on the whole map and in the close-up, painted into the map's `EditableImage` (no GUI objects); armies and fleets out of sight are simply not there, and their tokens go when they leave your sight. Without `EditableImage` there is no haze, and the tokens still hide.
+
 ### Navies
 
 Each map's water is split into named **sea zones** (on Skyshards, **space zones** in the void around the shards). Nations build ships in their coastal provinces, carry armies across the water, fight at sea, close straits and blockade coasts. Rules: `Sim/Navy.luau`; numbers: `Config.Navy`; the zones of each map: `docs/MAPS.md` "Sea zones"; balance: measured with bot tournaments once bots sail (stage 3).
@@ -384,7 +411,7 @@ Each map's water is split into named **sea zones** (on Skyshards, **space zones*
 - **Blockades:** your coastal province is blockaded while an enemy fleet is in one of its zones and no fleet of yours or an ally's is there. It earns 50% less gold, can't launch ships, and sieges of it by the blockader's side run 1.25× as fast. You get a toast when a blockade starts.
 - **War reach:** you may declare war on a nation you share a sea zone with (both hold a coast of it), not only on one you border by land, because fleets make wars across water real.
 - **Races at sea:** race passives are about armies. At sea there is no Attack, Forest or Hills bonus, every fleet sails at the same speed (Swift is for marching), and an Upkeep race pays less for the men aboard but full price for its ships.
-- **Who sees fleets:** everyone sees every fleet for now. One helper decides it (`Navy.visible`), so fog of war can hide fleets later without touching the rules.
+- **Who sees fleets:** one helper decides it (`Navy.visible`): your own and your allies' fleets, and the others in a sea zone your nation sees while the fog of war is on (see "Fog of war"); everyone sees every fleet with it off.
 - **Controls** (the same flow as moving an army): tap your fleet, then a sea zone (or an enemy fleet in it) to sail there, or a coastal province to land there, see the route and its time, then Sail or Land. To embark, tap an army, then one of your fleets, then Board. Ships are built from an owned coastal province's sheet: the Ships tile opens the choice of 1 to 5 (25 gold each); on a blockaded coast it is greyed with an anchor and "Blockaded". The fleet sheet shows the ships and their zone, the men aboard out of the room (and the main troop types aboard), and where the fleet is going; tapping someone else's fleet shows the same without orders. What the server would refuse is said at once with the same toast (no coast, nobody aboard, the fleet is full).
 - **On the map:** each fleet is the map's ship in its nation's colours (a Galleon, a Dragonship with a dragon's head and a row of shields, a steel Starship), 16 × 12 pixels, at its zone's centre, gliding from zone to zone; fleets resting in one zone sit side by side. Its badge is the army badge's plate with a ship icon (a burst in a sea battle, a white flag retreating), its ships and the men aboard ("3 · 2k"). Zoomed out, each zone's name stands under its centre in pale blue italics, wherever it covers no province name. A blockaded coast gets an anchor pill (blue edge) in its status row: from the region zoom inwards on every coast, zoomed out only on yours and where you blockade. Sea battles get spray and crossed swords when they start and a burst when they end, with a skull if a fleet sank.
 - **Toasts:** a sea battle won or lost (with the zone's name), a blockade starting (for the blockaded nation and the blockader) and your army landing.
@@ -482,8 +509,8 @@ tools/mapgen/                  -- Python generator for everything in assets/
 5. Every 10th tick: pay income and upkeep.
 6. Update Primordial-power charges and timers.
 7. Bots plan (staggered: 1–2 bots per tick).
-8. Offers and insults' answer windows expire; event cards whose time ran out take their default choice, and nations whose next card is due get one; then check win conditions and phase changes.
-9. Send one delta to every client, and each player their own event card (only when it changed).
+8. Offers and insults' answer windows expire; event cards whose time ran out take their default choice, and nations whose next card is due get one; missions done pay their reward and empty mission slots whose time has come get a goal; then check win conditions and phase changes.
+9. Send one delta to every client (with the fog of war on, each player their own: what their nation sees), and each player their own event card and missions (only when they changed).
 
 A sandbox server ("Sandbox") runs the same order at the speed its player sets (none paused, up to 4 ticks a second), without the win check and without match stats, rewards or analytics.
 
@@ -492,7 +519,8 @@ A sandbox server ("Sandbox") runs the same order at the speed its player sets (n
 - **On join:** one full snapshot of provinces, nations, armies and fleets.
 - **Every tick:** one batched delta with only what changed (owners, development, blockades, armies, fleets, battle events).
 - **Army movement:** an `UnreliableRemoteEvent` with progress between province centres; the client interpolates the token.
-- **Fleet movement:** a sailing fleet's progress towards its next zone goes on the same unreliable channel as the moving armies (in a list of its own), so its record is in a delta only when something else changes: a new zone, a battle, its hull, cargo or orders. The client glides the token between zone centres. The snapshot and the positions hold only the fleets `Navy.visible` shows (everyone sees every fleet for now, so one delta and one positions stream go to everyone; fog of war will need one per viewer). A sailing fleet costs about 36 bytes a tick (4 numbers) plus its record once per zone it enters, where it cost a whole record every tick before.
+- **Fleet movement:** a sailing fleet's progress towards its next zone goes on the same unreliable channel as the moving armies (in a list of its own), so its record is in a delta only when something else changes: a new zone, a battle, its hull, cargo or orders. The client glides the token between zone centres. The snapshot and the positions hold only the fleets `Navy.visible` shows.
+- **Fog of war:** with it on, each player's snapshot, deltas and positions hold only what their nation sees, and its vision (see "Fog of war"); with it off, one delta and one positions stream go to everyone. A sailing fleet costs about 36 bytes a tick (4 numbers) plus its record once per zone it enters, where it cost a whole record every tick before.
 - **Intents:** the client fires `Request…` remotes; the server answers with `CommandResult` (ok or reason).
 
 ### Security
@@ -539,7 +567,7 @@ The map is 2D pixel art in the style of WorldBox, drawn in a full-screen GUI. Th
 | Map GUI objects (names, tokens, dots) | ≤ 2,000 |
 | Armies on the map | ≤ 60 |
 | Server work per tick | < 5 ms |
-| Network per client | < 10 KB/s |
+| Network per client | < 10 KB/s (the soak measures what one player is sent over a whole match, with the fog of war on and off: `docs/BALANCE.md` section 23) |
 
 ## Data model
 
@@ -654,6 +682,10 @@ export type MatchState = {
                                -- had, the open card { id, event, province, untilTick }, the last one closed
     boosts: { Boost },         -- { nation, bonus, untilTick }: an event's income boost
     nextCardId: number,        -- card ids count up, so a late tap can't answer the next card
+    -- the EU4 pack's missions (Sim/Missions.luau): private to each nation, never in the snapshot
+    missions: { [NationId]: MissionBoard }, -- { missions, refills, last?, done }: the open goals { id, kind,
+                               -- target, base, need, untilTick }, when empty slots get one, the last one closed
+    nextMissionId: number,
 }
 ```
 
@@ -731,8 +763,9 @@ export type Command =
 | `RequestEmbark` | client → server | armyId, fleetId (walk to the fleet's coast and board) |
 | `RequestEventChoice` | client → server | cardId, choice (1 or 2): the EU4 pack's event cards |
 | `EventCard` | server → client | your own nation's open event card and last closed one (`Types.EventCardView`: ids, a province, a tick, the choice made); to you alone, never in the delta |
+| `Missions` | server → client | your own nation's missions with their progress and the last one closed (`Types.MissionView`); to you alone, never in the delta |
 | `CommandResult` | server → client | requestId, ok, reason |
-| `Snapshot` | server → client | full match state, sent on join (every nation's race, every army's composition, the fleets you see with the men aboard) |
+| `Snapshot` | server → client | full match state, sent on join (every nation's race, every army's composition, the fleets you see with the men aboard; with the fog of war on, only the armies and fleets your nation sees, and its vision) |
 | `Delta` | server → client | changed provinces (with their blockade), nations, armies (with their composition), fleets (with their progress while sailing), events |
 | `ArmyPositions` (unreliable) | server → client | tick; moving armies (id, from, to, progress %) and sailing fleets (id, from zone, to zone, progress %), two flat arrays, 16 a message |
 | `Notify` | server → client | toast type and text |
@@ -757,6 +790,7 @@ Phone first: the map fills the screen, the HUD stays on the edges, and every act
 - **Left drawer:** nation list with colour, province count and relation icon (ally, at war, truce, military access). A tap on another nation's row closes the drawer and shows that nation's capital with its bottom sheet, so its diplomacy buttons are one tap from the list.
 - **Bottom sheet (tap a province):** owner, development, building, plus buttons for Develop, Build and Recruit (five buttons, one per troop of your race's roster in role order, each Named `Recruit_<troop>` and showing its price) and, on a coast, Ships, or Declare war and Ally (Peace with its tributes at war) on foreign provinces. With the `diplomacy` setting on, also Insult (one tap, no message; greyed with the seconds left while the pair's wait runs), Gift (its price, or the wait) and Access (to ask for military access; "Military access" doesn't fit a 102 px tile), in the same Diplomacy row.
 - **Insults on screen:** no message, ever (see Diplomacy). The target gets a neutral toast and an answer card in the top-right column (where offers show, under the toast line) with its timer, the grudge and two buttons, Insult back and Laugh it off (with its +5% and 1:00); everyone sees an anger mark in a round badge over the target's capital for 5 s; the one who acted gets a private flavour toast.
+- **Missions:** a plate of three goal tiles in the top-right column, under the offers; it steps aside while anything else is in the column or a bottom sheet is open (see "Missions").
 - **Event cards:** a framed card first in the top-right column (above an insult's answer card and the offers): the event's title on its plate, a line of flavour, the province, a countdown and two choice buttons side by side with their effects as icon chips (grey when you can't pay; the card stays short enough to clear the power button). It never blocks the map for long: 20 s at most, then its default happens and a toast says what. Only your own client ever shows your card's words.
 - **Moving armies:** tap the army, tap the destination, see the path with arrival time (at the army's own speed), tap Confirm. The army sheet shows the composition as chips (troop icon and men, and the troop's name while there are three types or fewer) and, with a special in the army, its trick ("Sappers: besieges 2x as fast"). Fleets work the same way (see "Navies").
 - **Primordial powers:** a power button opens a radial menu; pick a power, tap a target, confirm.
@@ -845,6 +879,9 @@ Each bot checks a short priority list every few seconds and does the first actio
 7. **Primordial power:** with 2 charges, Meteor the biggest army of a nation I'm at war with that isn't immune right now. This rides along with whatever else the plan does, so charges don't pile up.
 8. **Insults and access** (with the `diplomacy` setting on; they ride along too): accept a nation's military access request unless I'm at war with it or hold a grudge against it; when insulted, insult back half the time (decided once per insult), otherwise keep the grudge (bots never laugh one off); and now and then (0.2% of plans, about one insult per bot in a match) insult a rival: a nation I'm at war with, else a neighbour that isn't my ally.
 9. **Event cards** (with the `events` setting on; they ride along too): answer my open card once, with the affordable choice worth more gold (`Sim/EventCards.worth`).
+10. **Missions** (with the `missions` setting on): my Take goal's province is the first target the Expand and Attack steps look at, and the Build step pays for my capital's next level (Grow) or a fort (Fort) before anything else (`Sim/Missions.botOrder`).
+
+**Fog of war:** with it on, a bot plans with the armies its nation (and its allies) see: the others don't exist for its threats, targets, war odds and Meteor.
 
 **Grudges:** an insulted bot leans towards war with its insulter. In the Attack step a neighbour that insulted me is the first war target, and my stack needs only 0.85× my usual attack ratio against it, never under 1× (an even fight). It doesn't change how strong my whole side must be.
 
@@ -945,10 +982,12 @@ Five phases, each ending in a playtest gate the owner runs in Studio.
 
 ### EU4 pack
 
-The owner's "diplomacy like insulting" and more EU4 flavour, in stages. Later stages: generals, missions, fog of war.
+The owner's "diplomacy like insulting" and more EU4 flavour, in stages. A later stage: generals (after the smarter-PvP stage).
 
 - [x] Stage 1: insults as a diplomatic action with no message (Roblox's preset-text rule) and their answers (insult back, laugh it off), grudges, private flavour lines, gifts and military access, a match setting to turn them off, bots that insult, insult back and lean towards war with an insulter (harness scenario `diplomacy`; evidence: `docs/BALANCE.md` section 20)
 - [x] Stage 2: events with choices: an event card every few minutes for each nation (33 events: a shared pool and one per map, coast, fleet and war events only when they apply), two choices with clear effects (gold, manpower, development, regiments, a ship, an income boost), a 20 s default, shown only to its own player, bots answering through the same command, a match setting, `event_card` analytics (harness scenario `events`; evidence: `docs/BALANCE.md` section 21)
+- [x] Stage 3: missions: three short goals at a time for every nation (take a named neighbouring province, develop the capital, build a fort, win battles, join an alliance), each with a clear reward, replaced when done or gone, bots getting and leaning towards them by the same rules, private to each player (the event-card pattern: its own remote and the offers column), a match setting, `mission` analytics (harness scenario `missions`; evidence: `docs/BALANCE.md` section 22)
+- [x] Stage 4: fog of war: one Config line, a private-server setting and Studio's `FogOfWar` switch; a nation sees its land and the land next to it, where its armies and fleets are and what its allies see; per-player deltas and positions with it on, one stream with it off; bots obey it; a light haze over unseen land in the map's own image (harness scenario `fog`, the soak's network check; evidence: `docs/BALANCE.md` section 23)
 
 ### Phase 5: Soft launch
 

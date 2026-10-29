@@ -24,6 +24,7 @@ local Sandbox = {}
 function Sandbox.setup(): Types.MatchSetup
 	local setup = Settings.setup(false)
 	setup.sandbox = true
+	setup.settings.fog = false -- a world to watch: every army in sight
 	return setup
 end
 

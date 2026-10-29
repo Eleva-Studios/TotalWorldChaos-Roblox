@@ -10,6 +10,8 @@
 --   SET="Siege.TicksPerDevelopment=20" lune run tools/harness/tournament   # what-if: override Config values first
 --   SET="Features.Diplomacy=false" lune run tools/harness/tournament 200 earth   # a match feature off (true/false)
 --   SET="Features.Events=false" lune run tools/harness/tournament 200 earth      # no event cards (the EU4 pack, stage 2)
+--   SET="Features.Missions=false" lune run tools/harness/tournament 200 earth    # no missions (the EU4 pack, stage 3)
+--   SET="Features.FogOfWar=false" lune run tools/harness/tournament 200 earth    # bots see every army (no fog of war)
 --   lune run tools/harness/tournament 200 eldmoor     # start-position balance (docs/BALANCE.md section 16)
 --   RACES=shuffle lune run tools/harness/tournament 100   # races dealt out at random each match (the map's mix):
 --                                                         # race strength without the start positions in it
@@ -100,6 +102,8 @@ type MatchStats = {
 	cards: number, -- the EU4 pack's event cards closed (stage 2), and how many of them ran out of time
 	cardsTimedOut: number,
 	granted: { [string]: number }, -- what the closed cards gave, by effect (gold, manpower, development, regiments...)
+	missionsDone: { [string]: number }, -- the EU4 pack's missions (stage 3) bots finished, by kind...
+	missionsExpired: number, -- ...and those that ran out of time or couldn't be done any more
 	leaderChanges: number, -- minutes (from 3:00) that ended with a different nation holding the most provinces
 	armyStats: { [number]: ArmyStats }, -- at the end of minutes 15 and 25 (or the end of the match)
 	group: { [number]: string }, -- mixed mode: nation -> "A" or "B"
@@ -226,9 +230,12 @@ local function runMatch(mapId: string, seed: number): MatchStats
 		cards = 0,
 		cardsTimedOut = 0,
 		granted = {},
+		missionsDone = {},
+		missionsExpired = 0,
 		leaderChanges = 0,
 		armyStats = {},
 	}
+	local lastMission: { [number]: number } = {} -- nation -> the last closed mission counted
 	local lastCard: { [number]: number } = {} -- nation -> the last event card counted
 	while state.result == nil do
 		for _, order in queue do -- 1. apply queued commands
@@ -299,6 +306,17 @@ local function runMatch(mapId: string, seed: number): MatchStats
 				end
 			end
 		end
+		for id, b in state.missions or {} do
+			local closed = b.last
+			if closed and lastMission[id] ~= closed.id then
+				lastMission[id] = closed.id
+				if closed.done then
+					stats.missionsDone[closed.kind] = (stats.missionsDone[closed.kind] or 0) + 1
+				else
+					stats.missionsExpired += 1
+				end
+			end
+		end
 		if state.tick % 60 == 0 or state.result then
 			local best, leader = 0, 0
 			for id = 1, #state.nations do
@@ -342,6 +360,8 @@ local function runMatch(mapId: string, seed: number): MatchStats
 		cards = stats.cards,
 		cardsTimedOut = stats.cardsTimedOut,
 		granted = stats.granted,
+		missionsDone = stats.missionsDone,
+		missionsExpired = stats.missionsExpired,
 		leaderChanges = stats.leaderChanges,
 		armyStats = stats.armyStats,
 		group = group,
@@ -403,6 +423,8 @@ for _, mapId in mapIds do
 	local rejected, commands, wars, conquests, leaderChanges, powers = 0, 0, 0, 0, 0, 0
 	local insults, insultsBack, grudgeWars, cards, cardsTimedOut = 0, 0, 0, 0, 0
 	local granted: { [string]: number } = {}
+	local missionsDone: { [string]: number } = {}
+	local missionsExpired = 0
 	local atMinute: { [number]: { [string]: { number } } } = {}
 	for _, m in { 15, 25 } do
 		atMinute[m] = { armies = {}, men = {}, maxMen = {}, stacked = {}, gold = {}, manpower = {} }
@@ -487,6 +509,10 @@ for _, mapId in mapIds do
 		for effect, amount in s.granted do
 			granted[effect] = (granted[effect] or 0) + amount
 		end
+		for kind, n in s.missionsDone do
+			missionsDone[kind] = (missionsDone[kind] or 0) + n
+		end
+		missionsExpired += s.missionsExpired
 		leaderChanges += s.leaderChanges
 		for k, v in s.rejectReasons do
 			reasons[k] = (reasons[k] or 0) + v
@@ -595,6 +621,21 @@ for _, mapId in mapIds do
 	if #gave > 0 then
 		print("  event cards gave per nation per match (boost: summed bonus): " .. table.concat(gave, ", "))
 	end
+	local done, byKind = 0, {}
+	for _, kind in { "Take", "Grow", "Fort", "Win", "Ally" } do
+		local n = missionsDone[kind] or 0
+		done += n
+		table.insert(byKind, string.format("%s %.2f", kind, n / seeds / 10))
+	end
+	print(
+		string.format(
+			"missions done per match %.1f (%.1f per nation: %s), expired %.1f per nation",
+			done / seeds,
+			done / seeds / 10,
+			table.concat(byKind, ", "),
+			missionsExpired / seeds / 10
+		)
+	)
 	print(
 		string.format(
 			"provinces taken from nations per match %.1f  |  leader changes per match (minute checks after 3:00) %.1f  |  powers used by bots per match %.1f",

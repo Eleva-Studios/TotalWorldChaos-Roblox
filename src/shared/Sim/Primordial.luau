@@ -17,6 +17,7 @@
 local Army = require("./Army")
 local Config = require("../Config")
 local Events = require("./Events")
+local Fog = require("./Fog")
 local Navy = require("./Navy")
 local Rng = require("./Rng")
 local Settings = require("./Settings")
@@ -243,6 +244,10 @@ function Primordial.use(state: MatchState, caster: Caster, power: Power, target:
 	end
 	if Primordial.TARGETS[power] == "Army" then
 		target = Army.resolve(state, target)
+		local army = state.armies[target]
+		if army and caster.nation and not Fog.seesArmy(Fog.vision(state, caster.nation), army) then
+			return false, "UnknownArmy" -- out of the caster's sight (the fog of war): as if it weren't there
+		end
 	end
 	local hit, at, err = Primordial.check(state, power, target)
 	if hit == nil then

@@ -42,6 +42,7 @@ export type Art = {
 	capitals: { [number]: { x: number, y: number, kind: string } }, -- kind: whose capital it is (capitalKind)
 	styles: { [number]: NationStyle }, -- nation slot -> its border style and shade set (cosmetics); missing = default
 	selected: number,
+	fog: { [number]: boolean }, -- provinces out of sight (the fog of war): painted under a light haze
 	near: buffer, -- per pixel: which border checks it needs (NEAR_* bits), worked out once per map
 	dirty: { number }?, -- x0, y0, x1, y1 of what changed since the last takeDirty
 	biomes: { [number]: Style }, -- province id -> its biome's style
@@ -195,6 +196,10 @@ local HULL = 6 -- pixels of platform hull drawn below Skyshards land
 local NATION_ALPHA = 0.587
 local BORDER_ALPHA = 0.88
 local PROVINCE_LINE = 0.86 -- 1-pixel lines between provinces darken the terrain to this share
+-- The fog of war (docs/DESIGN.md "Fog of war"): land your nation doesn't see is washed towards a pale haze at this
+-- opacity: light, so the owners' colours still read through it.
+local FOG_COLOUR = 0xdfe3ea
+local FOG_ALPHA = 0.38
 
 -- Sprites: rows of characters, "." is transparent; colours come from the biome's sprite table (or its light,
 -- base and dark shades for L, M and D), or are fixed (W white, G light grey).
@@ -1174,6 +1179,7 @@ local function paintProvince(art: Art, pid: number)
 	local nation = if o ~= 0 then art.color[o] or 0x808080 else 0
 	local border = if o ~= 0 then art.border[o] or scale(nation, 0.75) else 0
 	local selected = art.selected == pid
+	local fogged = art.fog[pid] == true
 	local w = art.width
 	local ids, terrain, near, pixels = art.ids, art.terrain, art.near, art.pixels
 	local look = if o ~= 0 then art.styles[o] else nil
@@ -1205,7 +1211,8 @@ local function paintProvince(art: Art, pid: number)
 			if flags == 0 then
 				local f = inside[c]
 				if f == nil then
-					f = rgba(if selected then mix(wash(c), 0xffffff, 0.3) else wash(c))
+					local v = if selected then mix(wash(c), 0xffffff, 0.3) else wash(c)
+					f = rgba(if fogged then mix(v, FOG_COLOUR, FOG_ALPHA) else v)
 					inside[c] = f
 				end
 				buffer.writeu32(pixels, i * 4, f)
@@ -1230,6 +1237,9 @@ local function paintProvince(art: Art, pid: number)
 			end
 			if selected then
 				v = if bit32.btest(flags, NEAR_EDGE) then 0xffffff else mix(v, 0xffffff, 0.3)
+			end
+			if fogged then
+				v = mix(v, FOG_COLOUR, FOG_ALPHA)
 			end
 			buffer.writeu32(pixels, i * 4, rgba(v))
 		end
@@ -2861,6 +2871,7 @@ local function detailSprites(ctx: Ctx, yield: Yield?)
 end
 
 type Washes = { inner: { [number]: number }, wash: { [number]: number }, rim: { [number]: number } }
+local FOGGED_WASHES = 1000 -- the inner washes of fogged provinces are cached under their owner + this
 
 -- The kingdom layer over map pixels cx0..cx1, cy0..cy1 (inside the close-up), into its RGBA pixels: a lighter
 -- wash, a stronger rim, the border line, lines between provinces and the selection. `only`: just this province's
@@ -2918,9 +2929,10 @@ local function detailPolitics(ctx: Ctx, cx0: number, cy0: number, cx1: number, c
 				if only and E ~= only then
 					continue
 				end
-				-- inside a province: only the wash (and the selection's tint)
+				-- inside a province: only the wash (and the selection's tint, and the fog of war's haze)
 				local o = ownerOf(E)
-				local cache = if E == selected then nil else washesOf(o).inner
+				local fogged = art.fog[E] == true
+				local cache = if E == selected then nil else washesOf(if fogged then o + FOGGED_WASHES else o).inner
 				for sy = 0, f - 1 do
 					local o1, p1 = base + sy * ew, pbase + sy * dw
 					for sx = 0, f - 1 do
@@ -2930,6 +2942,9 @@ local function detailPolitics(ctx: Ctx, cx0: number, cy0: number, cx1: number, c
 							local t = if o ~= 0 then mix(c, tintOf(o, c), DETAIL_ALPHA) else c
 							if E == selected then
 								t = mix(t, 0xffffff, 0.3)
+							end
+							if fogged then
+								t = mix(t, FOG_COLOUR, FOG_ALPHA)
 							end
 							v = rgba(t)
 							if cache then
@@ -3013,6 +3028,9 @@ local function detailPolitics(ctx: Ctx, cx0: number, cy0: number, cx1: number, c
 						end
 						if q == selected then
 							v = if dId <= DETAIL_SELECT then 0xffffff else mix(v, 0xffffff, 0.3)
+						end
+						if art.fog[q] then
+							v = mix(v, FOG_COLOUR, FOG_ALPHA)
 						end
 					end
 					buffer.writeu32(out, (pbase + sy * dw + sx) * 4, rgba(v))
@@ -3212,6 +3230,7 @@ function PixelArt.new(map: MapLike, grid: Grid, yield: Yield?, look: string?): A
 		capitals = {},
 		styles = {},
 		selected = 0,
+		fog = {},
 		near = buffer.create(w * h),
 		dirty = nil,
 		biomes = {},
@@ -3402,6 +3421,37 @@ function PixelArt.select(art: Art, pid: number?): boolean
 	end
 	if new ~= 0 then
 		paintProvince(art, new)
+	end
+	drawCapitals(art)
+	return true
+end
+
+-- The fog of war: these provinces (id -> true) are out of sight and get a light haze; every other is clear. Repaints
+-- only the provinces that changed. Returns true if anything changed.
+function PixelArt.setFog(art: Art, hidden: { [number]: boolean }): boolean
+	local repaint: { [number]: boolean } = {}
+	for pid in art.fog do
+		if not hidden[pid] then
+			repaint[pid] = true
+		end
+	end
+	for pid in hidden do
+		if not art.fog[pid] and art.boxes[pid] then
+			repaint[pid] = true
+		end
+	end
+	if next(repaint) == nil then
+		return false
+	end
+	local fog: { [number]: boolean } = {}
+	for pid in hidden do
+		if art.boxes[pid] then
+			fog[pid] = true
+		end
+	end
+	art.fog = fog
+	for pid in repaint do
+		paintProvince(art, pid)
 	end
 	drawCapitals(art)
 	return true

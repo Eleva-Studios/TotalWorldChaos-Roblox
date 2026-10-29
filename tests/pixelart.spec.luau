@@ -255,6 +255,28 @@ T.test("selecting a province shows in the close-up, and deselecting restores it"
 	T.expect(not PixelArt.syncDetail(close1, detail), "nothing left to catch up")
 end)
 
+T.test("the fog of war hazes provinces out of sight, whole map and close-up, and clearing it restores them", function()
+	local x, y = inside(provB)
+	local before = PixelArt.pixel(close1, x, y)
+	local closeBefore = buffer.tostring(detail.pixels)
+	T.expect(PixelArt.setFog(close1, { [provB] = true }), "something changed")
+	local hazed = PixelArt.pixel(close1, x, y)
+	T.expect(hazed ~= before, "the whole map's pixel is hazed")
+	local function light(c: number): number
+		local r, g, b = rgb(c)
+		return r + g + b
+	end
+	T.expect(light(hazed) > light(before), "a light haze: paler, not darker")
+	T.equal(PixelArt.pixel(close1, inside(provA)), PixelArt.pixel(close1, inside(provA)), "province A untouched")
+	T.expect(PixelArt.syncDetail(close1, detail), "the close-up caught up")
+	T.expect(buffer.tostring(detail.pixels) ~= closeBefore, "the close-up is hazed too")
+	T.expect(not PixelArt.setFog(close1, { [provB] = true }), "the same fog repaints nothing")
+	T.expect(PixelArt.setFog(close1, {}), "cleared")
+	PixelArt.syncDetail(close1, detail)
+	T.equal(PixelArt.pixel(close1, x, y), before, "the whole map restored exactly")
+	T.expect(buffer.tostring(detail.pixels) == closeBefore, "the close-up restored exactly")
+end)
+
 T.test("an ownership change repaints only its part of the close-up, the same as a fresh painting", function()
 	PixelArt.takeDetailDirty(detail)
 	local before = buffer.tostring(detail.pixels)

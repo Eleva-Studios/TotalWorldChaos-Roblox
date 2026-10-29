@@ -159,6 +159,11 @@ local function render()
 end
 
 -- Show a fleet (nil hides the sheet), with the order the player is about to confirm.
+-- Is the sheet on screen? (The missions strip steps aside while a sheet is open.)
+function FleetSheet.isOpen(): boolean
+	return sheet ~= nil and sheet.Visible
+end
+
 function FleetSheet.show(fleetId: number?, order: Order?)
 	current = if fleetId then { fleet = fleetId, order = order } else nil
 	render()

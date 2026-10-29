@@ -269,6 +269,7 @@ T.test("free powers: no 30 s immunity, so the same nation can be hit again at on
 	local match = Match.new(Maps.get("skyshards"))
 	match.tick = Config.Phases.PeaceEndTick + 10
 	match.phase = "War"
+	match.setup.settings.fog = false -- what a caster sees has its own tests (fog.spec)
 	local army = Army.spawn(match, A, match.nations[A].capital, 4000)
 	match.nations[B].charges = 5
 	T.expect(Commands.applyFor(match, nil, B, { kind = "Power", power = "Meteor", target = army.id }))

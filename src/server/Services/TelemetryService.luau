@@ -63,6 +63,7 @@ local lastResults: { [number]: string } = {} -- userId -> MatchFlow session of t
 local lastCommand: { [number]: number } = {} -- userId -> match tick of their last command (seat time at first)
 local afk: { [number]: boolean } = {} -- afk_flagged sent this match
 local cardsLogged: { [number]: number } = {} -- userId -> the last event card event_card was sent for (this match)
+local missionsLogged: { [number]: number } = {} -- userId -> the last mission `mission` was sent for (this match)
 local startsLogged = false
 local endLogged = false
 local shopSession: { [Player]: string } = {}
@@ -294,6 +295,7 @@ local function newMatch(state: Types.MatchState)
 	lastCommand = {}
 	afk = {}
 	cardsLogged = {}
+	missionsLogged = {}
 	startsLogged = false
 	endLogged = false
 end
@@ -335,6 +337,18 @@ local function observePlayer(state: Types.MatchState, player: Player)
 	elseif outcome and cardsLogged[userId] ~= outcome.card then
 		cardsLogged[userId] = outcome.card
 		local e = Telemetry.eventCard(state, userId, outcome)
+		if e then
+			TelemetryService.send(e, player)
+		end
+	end
+	-- ...and their nation's last mission closed (done or expired), noted the same way on the first look
+	local board = if nationId and state.missions then state.missions[nationId] else nil
+	local closed = if board then board.last else nil
+	if missionsLogged[userId] == nil then
+		missionsLogged[userId] = if closed then closed.id else 0
+	elseif closed and missionsLogged[userId] ~= closed.id then
+		missionsLogged[userId] = closed.id
+		local e = Telemetry.mission(state, userId, closed)
 		if e then
 			TelemetryService.send(e, player)
 		end

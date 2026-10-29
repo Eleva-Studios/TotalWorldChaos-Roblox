@@ -119,6 +119,8 @@ function Match.new(map: MapDef, setup: Types.MatchSetup?): MatchState
 		chronicles = {},
 		boosts = {},
 		nextCardId = 1,
+		missions = {},
+		nextMissionId = 1,
 	}
 	-- neutral land starts with a garrison, so expanding means a small fight first
 	for _, def in map.provinces do
