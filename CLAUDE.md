@@ -70,9 +70,11 @@ docs/UI_DIRECTION.md   The "Slate & Brass" GUI: palette, painted frames, compone
 docs/NEXT_FEATURES.md  Plans and task cards for the next features (pings, replay and awards, music, empires, friends, …)
 docs/RIVALS.md         The top 10 rival games (and the sandbox side) and how we take our share
 docs/COMPETITOR_VIDEOS.md  What YouTube shows about the rivals (formats, creators, views) and what we do about it
+docs/HANDOFF.md        Start here in a new chat: the build's state, the remaining order and how the owner wants the work done
 assets/maps/           Generated per-map data (layout.json, province_ids.png) and previews
 assets/textures/       Generated seamless terrain tiles per theme
 tools/mapgen/          Python (numpy + Pillow) generator for everything in assets/
+tools/checks/          The coordinator's verification runs (fullrun, delta, shots) and the usage-cost script
 tools/harness/         Lune emulator that runs the built place's real scripts, plays scenarios and renders screenshots
                        (one file per scenario in tools/harness/scenarios/, shared helpers in H.luau)
 roblox.yml             Roblox API list for Selene (committed; see Commands)

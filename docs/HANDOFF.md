@@ -1,85 +1,90 @@
-# Build hand-off (for a new chat)
+# Hand-off: how to continue the build in a new chat
 
-The coordinator's notes: where every stage stands, the order of the remaining work and the owner's preferences. Plans for the next features are in `docs/NEXT_FEATURES.md` (9.10–9.14 are the newest). Paths under `/tmp/claude-0/…` and `.claude/worktrees/` existed only in the first cloud session.
+Read this after `CLAUDE.md` at the start of every new chat. It holds the state of the build, the order of the remaining work, and exactly how the owner wants the work done. Keep it short and up to date: the coordinator updates it before every chat change.
 
-# Builds (paused 29 October about 07:30 UTC; resumed about 08:10 UTC)
+## Start a new chat with
 
-Wrapped up for the day (29 October ~13:00 UTC, owner's request). Main (pushed) is 76989cd: pings, Slate & Brass step 7, smarter PvP and navies stage 3 are all merged. Missions + fog: WIP 97612d5 (merged with navy; steps left in its commit body). Tomorrow: a fresh xhigh builder continues missions + fog from 97612d5, then the order in the notes below. trial26 (at main) is free.
+> Read CLAUDE.md and docs/HANDOFF.md, then continue the build on branch `claude/zen-pascal-446t9e` as the coordinator: one builder at a time, and remind me when it's time for a new chat.
 
-Main (pushed): `b5485bb`. It holds:
-- the sandbox;
-- navies 1–2 and the fleet positions;
-- the Primordial anti-focus cooldown;
-- the start menu;
-- five troops per race;
-- Slate & Brass steps 4–6;
-- EU4 stages 1–2 (insults, gifts, access, event cards);
-- music;
-- docs: monetization plan section 13, RIVALS.md, NEXT_FEATURES 9.9.
+## 1. State (5 November 2026)
 
-Unfinished stages, all committed on their worktree branches:
+- **Main** = `claude/zen-pascal-446t9e`, pushed. Merged and fully checked: everything up to navies stage 3, plus map pings, Slate & Brass GUI step 7, smarter PvP (counters, morale, flanking), bots at sea. Newest plans and docs: `docs/NEXT_FEATURES.md` 9.10–9.14, `docs/RIVALS.md`, `docs/COMPETITOR_VIDEOS.md`.
+- **In progress: EU4 missions + fog of war.** WIP commit `97612d5` ("WIP (paused for the day): missions and fog after the navy merge"); its commit body lists what is done and the remaining steps. It is on branch `claude/zen-pascal-446t9e-missions-fog-wip` if the owner approved pushing it; otherwise it exists only in the first cloud session (branch `worktree-agent-a9df32e16041059c3`), so ask the owner before redoing it.
+  - Done: merged with everything up to navy; fog consistent (bots, fleets, counter hints, pings keep to sight); quick checks pass (43 spec files); `smoke`, `fog`, `missions`, `private` pass.
+  - The builder's decision for the owner to confirm: the Missions and Fog switches sit on a third private-server tab, "More".
+  - Left: all scenarios with fog on; soaks with the ten-viewer network numbers; tournaments missions on/off and fog on/off (200 seeds per map); BALANCE.md sections 24 (missions) and 25 (fog); final commits; merge main.
 
-| Stage | Branch | Commit | State | Next step |
+## 2. The remaining work, in order
+
+| # | Stage | Effort | Hours | Plan |
 | --- | --- | --- | --- | --- |
-| EU4 missions + fog of war | `worktree-agent-a9df32e16041059c3` | `97612d5` (WIP after merging navy 63caefd in 377e945) | Merged with everything; fog consistent (no extra code needed); quick checks pass (43 spec files); smoke, fog, missions, private (also 667) pass. Missions/Fog switches on a new third private-sheet tab "More" (builder's decision, tell the owner) | Fresh xhigh builder: the steps in 97612d5's commit body (all scenarios with fog on, soaks with ten-viewer numbers, tournaments missions/fog on/off, BALANCE 24-25, final commits, merge main) |
+| 1 | Missions + fog of war (finish from the WIP) | xhigh | ~3 | the WIP's commit body |
+| 2 | Generals + keep morale aboard fleets (bug: a broken army that sails lands at full morale) | high | 2.5–3.5 | DESIGN EU4 pack; BALANCE 23 "Watch" |
+| 3 | Bot strategy: Hard must clearly beat Normal (now ~35%), mass armies, time attacks to Peace's end, help allies | xhigh | 3–4 | BALANCE 16, 22, 23 |
+| 4 | Combat feel: battle preview, split and send a share, multi-select, rally points, readable battles, war overlay | high | 6–8 | NEXT_FEATURES 9.14 |
+| 5 | GUI step 8 (the event card covers the province sheet on phones; toasts dropped when 4 are queued) + tap help | high | 3–4.5 | UI_DIRECTION; NEXT_FEATURES 9.10 C |
+| 6 | Replay + awards (tell the match's story; comeback and underdog labels) | high | 2–3 | NEXT_FEATURES 5; COMPETITOR_VIDEOS |
+| 7 | Play with friends | high | ~2 | NEXT_FEATURES 8 |
+| 8 | Game modes (Easy, Blitz, Long) + Classic (no Primordials) + one queue per playlist with the in-server map vote, join in progress | medium–high | 3–5 | NEXT_FEATURES 9.11, 9.13 |
+| 9 | Combined balance pass (Earth's Volga 2.14× with navies, Yangtze 0.33×, Skyshards races, event and mission pace) | xhigh | 3–4 | BALANCE 17, 22, 23 |
+| 10 | Final review → owner's Studio playtest → soft launch | high | ~2 | LAUNCH |
 
-Queue after these:
-- bot strategy (after navy);
-- generals (after PvP);
-- Slate & Brass step 8;
-- replay and awards;
-- play with friends;
-- game modes;
-- the combined balance pass (event-card and mission pace, Earth's Clans starts);
-- the final review;
-- optional: empire, monetization stages.
+That is the launch scope, about 30–40 hours. **After the soft launch, ordered by the data:** Primordials stage 1 (9.11, xhigh, 8–9 h), the bigger Earth (9.10 A+B, 3–4 h), Primordials stage 2, the sandbox stages (9.12; S1 painter + S3 powers first, then sharing and the map maker), Earth Ages and nukes (9.9), monetization stages and the flag art pass.
 
-Verification scripts are in `scratchpad/tools/`:
-- `fullrun.sh <dir> <prefix> [667 scenarios]`;
-- `resume_run.sh` for detached runs past the 2-hour limit;
-- `watch_once.sh`.
+## 3. How the work is done (the owner's rules; keep them exactly)
 
-## Owner's preferences (keep them)
+**Roles.** The chat itself is the **coordinator**: it briefs builders, verifies, merges and pushes, and talks to the owner. Builders are subagents that each finish **one stage**.
 
-**Usage and agents:**
-- Be careful with usage: the weekly limit was hit on 29 October with five builders.
-- The plan after the pause:
-  - I finish pings and Slate & Brass step 7 myself (run the checks, review, merge);
-  - then **one builder at a time**, at effort **high**;
-  - **xhigh** only for bot strategy, finishing missions and fog, and the combined balance pass.
-  - **Medium** where it's viable, but quality must stay the same (owner, 29 October ~08:10 UTC, when building resumed). Use it only for well-specified work with strong automated checks.
-- No second machine or session.
-- Never more than 5 agents.
-- Fresh agents per stage. Hand off at large contexts (over about 500k tokens).
-- Agents end their turn while checks run; no polling.
-- Don't wake agents needlessly.
+**Usage (the owner is careful with it; the weekly limit was hit once with five parallel builders):**
+- **One builder at a time.** Never more. No second machine or session unless the owner asks.
+- **Effort:** high by default; **xhigh** only for missions + fog, bot strategy, the balance pass and Primordials; **medium** only for well-specified data or content work with strong automated checks. Quality must never drop. Never a cheaper model unless the owner asks.
+- **A fresh builder per stage.** A builder hands off (commits a WIP with a precise status) when its context passes about **300k tokens**: a subagent's prompt cache lasts 5 minutes, so every wake-up after a long run re-writes its whole context.
+- **No polling.** Long runs (all scenarios, soaks, tournaments) start detached or in the background, the agent ends its turn and waits for the notification. Background runs die at 2 hours: use `setsid nohup … & disown` plus an until-loop waiter for longer ones.
+- **Short outputs:** grep and tail results; never print whole logs or read agent transcripts.
+- The coordinator verifies near-done work itself (its own cache lasts an hour, so checks cost it little).
 
-**Interruptions:**
-- A user interrupt (the stop button) cancels every builder for good. The harness then only allows new agents if the owner explicitly asks. Save WIP commits first.
-- A container restart kills background runs. Resumed agents (SendMessage) must re-run them.
+**Builder brief (what every brief contains):** the worktree and branch to work in (never the main checkout, never push); "read CLAUDE.md first" and the DESIGN/BALANCE sections to read; what main gained since the branch's base and the conflicts to expect; numbered steps (merge, resolve keeping all sides, checks, balance with numbers, docs, commits); the usage rules above; the final report format (SHAs, each conflict and how it was resolved, check numbers, then What changed / How to test in Studio / Decisions).
 
-**The verification workflow:**
-1. Make a scratch worktree from main and merge the stage with `--no-ff`.
-2. Run `tools/fullrun.sh` (`NO_SHOTS`, all scenarios, three soaks, the no-image runs, the 667×375 runs).
-3. Fast-forward main and push `claude/zen-pascal-446t9e`.
-4. Background runs die after 2 hours: run long ones detached (`setsid nohup … &`) with a waiter.
+**Verification before main moves (the coordinator, every stage):**
+1. A scratch worktree at main (`git worktree add --detach <dir> claude/zen-pascal-446t9e`), then `git merge --no-ff <stage commit>`.
+2. `tools/checks/fullrun.sh <dir> <prefix> <GUI scenarios for 667×375>` detached (40–70 min): stylua, selene, Lune tests, rojo build, every scenario, the soak on three maps (GUI peak under 2,000, network under budget), the no-EditableImage runs, the small-phone runs.
+3. For GUI changes, `tools/checks/shots.sh` at 844×390, 667×375 and 1366×1024 and **look at the screenshots**.
+4. A small fix after a green full run: `tools/checks/delta.sh` with the affected scenarios.
+5. All green → `git merge --ff-only` on the main checkout → `git push -u origin claude/zen-pascal-446t9e` (retry with backoff on network errors). Remove finished scratch worktrees.
+6. Known harmless: `progression` fails at 667×375 by design (the top bar hides the level on narrow phones); don't run it at that size.
 
-**Other:**
-- Commit trailers:
-  - `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`
-  - `Claude-Session: https://claude.ai/code/session_01CmaemW8ruDu6NfTovd2rhB`
-- Never use the banned words listed in CLAUDE.md's golden rules anywhere.
-- Flags and banners need a big art pass later. Not now.
-- Monetization: no strength for sale at launch; the other options stay open (docs/MONETIZATION.md 13.7).
-- The owner's brainstorm is saved for later (NEXT_FEATURES 9.9): a grand strategy mode for PC and tablets, Earth's eras and nukes, a WorldBox-level sandbox with player-made worlds.
-- Final messages to the owner follow CLAUDE.md: What changed, How to test in Studio, Decisions.
+**Quality bar:** every new Sim rule has a Lune test; balance changes only with tournament evidence (200 seeds per map; Gate 3: no start slot wins most matches; section 17's spread under about 2×); Config holds every number; GUI follows the Slate & Brass kit and fits 667×375; screenshots get looked at; builders' reports are claims until the coordinator's own run is green.
 
-## Notes for later stages (from the PvP builder, 29 October)
-- Bot strategy (xhigh): Hard bots beat Normal only ~41% head to head (BALANCE.md section 22; section 16's 56% doesn't reproduce even on main). Hard must clearly beat Normal.
-- Slate & Brass step 8: the event card overlaps part of the province sheet on a phone; the client drops a toast when 4 are queued, so a disaster toast can vanish behind conquest toasts (sandbox).
-- Combined balance pass (xhigh): with counters and morale, Skyshards' Crystal folk (+1.8 provinces) and Marines (+1.7) rose, Energy beings (-1.4) and Robots (-1.1) fell; Eldmoor's start slots spread more (best/worst land 2.8 vs 2.26); armies at 25:00 are smaller (Earth 201k -> 162k men).
+**Git:** branch `claude/zen-pascal-446t9e`; no pull request unless the owner asks; no model names in commits or docs. Commit trailers:
+`Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` and `Claude-Session: <the current chat's session link>`.
 
-## Notes from the navy builder (29 October)
-- Gameplay bug (already on main): a tired or broken army that boards a ship lands with full morale, so ships refresh morale. Fix by keeping morale aboard the fleet (Types change, Navy board/land, Bot landingParty, tests). Bundle it with the generals stage (generals must also survive boarding).
-- Bot strategy: Hard vs Normal fell to 35% with navies (41% without). Balance pass: Earth's Volga wins 54/200 with navies (2.14x fair share), Eldmoor's Frostmarch 54; Skyshards blockades +29% blockaded time.
-- Next order: missions + fog -> generals + morale-aboard fix (high) -> bot strategy (xhigh) -> combat feel (9.14, high) -> Primordials stage 1 (NEXT_FEATURES 9.11, xhigh) -> bigger Earth A+B (NEXT_FEATURES 9.10, high) -> GUI step 8 + tap help (9.10 C) -> replay + awards -> play with friends -> modes + Classic + map rotation and matchmaking (9.13) -> balance pass (xhigh) -> final review.
+**Talking to the owner:** short status updates at each merge or when something needs a decision; final messages follow CLAUDE.md (What changed, How to test in Studio, Decisions). The owner writes English or Swedish; answer in the same language. Show progress with screenshots from the harness when asked.
+
+## 4. When to start a new chat (the coordinator reminds the owner)
+
+A chat's cost per step grows with its length: every step re-reads the whole conversation. The coordinator says **"Time for a new chat"** (after updating this file and pushing) when any of these happens:
+- **2–3 stages merged** in the same chat;
+- the chat was **compacted** (a summary replaced the history), or it has run for more than a day of work;
+- the topic **switches** from building to long planning or research (or back);
+- before a **big xhigh stage** starts (missions + fog, bot strategy, the balance pass), so it begins from a small context.
+
+Before switching: no builder running (or it has committed a WIP), main pushed, WIP branches pushed (with the owner's OK), this file updated.
+
+**Local or cloud:** a local chat (on the owner's computer) for Roblox Studio tests, videos and screenshots (`ffmpeg` can pull frames from a video for review); a cloud chat for long builder runs and tournaments.
+
+## 5. The owner's decisions to keep
+
+- **Game:** a fun chaos EU4-style game, readable rather than twitch-skill. Fog of war on by default and easy to switch off. Primordials stay ("Chaos" playlist) and a **Classic** playlist has none. One queue per playlist; the map is chosen by the in-server vote (rotation as its backbone, no repeat of the last map). Sandbox players will make PvP maps and host matches (9.12 S7).
+- **Primordials (9.11):** chaos leans on the leader, never on the weak; announced, dodgeable hits; land scars that heal; toys for constant play; balance gated by bot Primordials with four personalities.
+- **Sandbox (9.12):** WorldBox-level and clearly above World Sim, with a ModernBox-style ages pack; never copy WorldBox's or mods' art, names or wording; some tools sold as sandbox-only passes; built after the PvP launch.
+- **Combat (9.14):** at or above RoFront and Conquer The World in feel; battles stay short and automatic.
+- **Map (9.10):** a bigger Earth with Europe enlarged; province merges only if needed.
+- **Money:** no strength for sale in matches; options stay open (MONETIZATION 13.7). Flags and banners get a big art pass before launch (hire a pixel artist for hero art).
+- **Launch:** PvP first, sandbox and the big extras after the soft launch, guided by data; seed creators (COMPETITOR_VIDEOS).
+- **Banned words:** see CLAUDE.md's golden rules; rival games whose names contain them are named by description or game id.
+
+## 6. Tools
+
+- `tools/checks/fullrun.sh`, `delta.sh`, `shots.sh`, `runset.sh`: the verification runs above (logs in `$CHECK_LOGS`, default `../check-logs`).
+- `tools/checks/usage_cost.py <session.jsonl>`: what a chat would have cost at API prices (the first chat: about $1,420 over 11,100 calls; one stage finished the careful way: about $12–15).
+- `tools/harness/tournament.luau`: bot tournaments (see its header for options).

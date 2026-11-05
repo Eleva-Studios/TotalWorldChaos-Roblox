@@ -8,3 +8,5 @@ sourcemap.json
 __pycache__/
 tools/harness/out/
 .claude/worktrees/
+tools/harness/out_*/
+check-logs/
